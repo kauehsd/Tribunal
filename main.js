@@ -137,6 +137,11 @@ async function sendMessage(){
   const msg = { sender: state.myName, role: state.myRole, text, ts: Date.now() };
   if(roomRef){ await roomRef.child('chat').push({ ...msg, type:'chat' }); }
   else { appendChatMessage(msg); }
+
+  const judgeTrigger = /^\s*(juiz|juí?z)([\s:,;!?.]|$)/i;
+  if(judgeTrigger.test(text)){
+    requestJudge();
+  }
 }
 
 async function addScore(side){ if(!roomRef) return; if(side==='acu') roomRef.child('scoreAcu').transaction(v=> (v||0)+1); else roomRef.child('scoreDef').transaction(v=> (v||0)+1); }
@@ -176,10 +181,64 @@ async function requestJudge(){
 
 function renderVerdict(v){ const wrap = $('verdict-wrap'); if(!wrap) return; wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div></div>`; }
 
+function renderCaseDetails(caseObj){
+  if(!caseObj) return;
+  const tags = caseObj.tags || [];
+  $('g-tags').innerHTML = tags.map(t=>`<span class="tag ${escapeHtml(t.c||'tg')}">${escapeHtml(t.t)}</span>`).join('');
+  $('g-title').innerHTML = caseObj.titulo || '';
+  $('g-body').innerHTML = caseObj.corpo || caseObj.context_juiz || '';
+
+  const guide = $('g-guide');
+  const hot = $('g-hot');
+  if(guide){
+    const sections = [];
+    if(caseObj.perguntas_acu?.length){
+      sections.push(`<div class="art-strategy-block asb-acu"><div class="asb-label">Perguntas da Acusação</div><div>${caseObj.perguntas_acu.map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
+    }
+    if(caseObj.perguntas_def?.length){
+      sections.push(`<div class="art-strategy-block asb-def"><div class="asb-label">Perguntas da Defesa</div><div>${caseObj.perguntas_def.map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
+    }
+    if(!sections.length && caseObj.hot?.length){
+      sections.push(`<div class="art-strategy-block"><div class="asb-label">Pontos-chave</div><div>${caseObj.hot.map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
+    }
+    guide.innerHTML = sections.join('');
+  }
+  if(hot){
+    hot.innerHTML = (caseObj.hot||[]).map(item=>`<div class="art-texto">• ${escapeHtml(item)}</div>`).join('');
+  }
+
+  const vadeGrid = $('vade-grid');
+  if(vadeGrid){
+    vadeGrid.innerHTML = (caseObj.vade||[]).map(item => {
+      const roleText = state.myRole==='acusacao' ? item.use_acu : item.use_def;
+      return `<div class="art-card expanded">
+        <div class="art-header">
+          <div class="art-header-content">
+            <div class="art-name">${escapeHtml(item.nome)}</div>
+            <div class="art-pena">${escapeHtml(item.pena||'')}</div>
+          </div>
+          <div class="art-chevron">›</div>
+        </div>
+        <div class="art-body">
+          <div class="art-texto">${escapeHtml(item.texto)}</div>
+          <div class="art-exp">${escapeHtml(item.exp||'')}</div>
+          <div class="art-juris">${escapeHtml(item.juris||'')}</div>
+          <div class="art-simple">
+            <div class="art-simple-lbl">Estratégia para ${state.myRole==='acusacao'?'Acusação':'Defesa'}</div>
+            <div class="art-simple-txt">${escapeHtml(roleText||'')}</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+}
+
 function launchGame(){
   document.getElementById('s-lobby').classList.remove('active'); document.getElementById('s-game').classList.add('active');
-  // set headers
-  const caseObj = window.CASES && window.CASES[state.caseIdx]; if(caseObj){ $('g-title').innerHTML = caseObj.titulo; $('g-body').innerHTML = caseObj.corpo || caseObj.context_juiz || ''; }
+  const caseObj = window.CASES && window.CASES[state.caseIdx];
+  if(caseObj){
+    renderCaseDetails(caseObj);
+  }
   $('gtb-title').textContent = `Sala ${state.roomCode} • ${caseObj?caseObj.nome:''}`;
   $('gtb-role-txt').textContent = state.myRole==='acusacao'?'ACUSAÇÃO':'DEFESA';
 }
