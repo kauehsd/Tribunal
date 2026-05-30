@@ -9,6 +9,10 @@ let roomRef = null;
 let presenceRef = null;
 let localClientId = Math.random().toString(36).slice(2,9);
 
+// debounce timer for auto re-running judge when players respond
+let judgeDebounceTimer = null;
+function scheduleJudgeRerun(delay=1800){ if(judgeDebounceTimer) clearTimeout(judgeDebounceTimer); judgeDebounceTimer = setTimeout(async ()=>{ try{ if(!roomRef) return; const snap = await roomRef.child('judge_pending').once('value'); if(snap && snap.val()){ requestJudge(); } }catch(e){ console.warn('scheduleJudgeRerun failed', e); } }, delay); }
+
           if(roomRef) {
             await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge', _stage:update.stage, _meta:meta });
             // se forem perguntas, guarde separadamente para renderização do case/veredito
@@ -110,6 +114,12 @@ function setupRealtimeListeners(){
   const chatRef = roomRef.child('chat');
   chatRef.on('child_added', snap => {
     const msg = snap.val(); if(!msg) return; appendChatMessage(msg);
+    // se houver perguntas pendentes do juiz e mensagem de usuário, agendar re-análise
+    try{
+      if(msg.type === 'chat' && msg.sender && msg.sender !== 'Juiz'){
+        roomRef.child('judge_pending').once('value').then(snap => { if(snap && snap.val()){ scheduleJudgeRerun(1500); } }).catch(()=>{});
+      }
+    }catch(e){ console.warn('chat child_added handler', e); }
   });
   // score
   roomRef.child('scoreAcu').on('value', s => { const v = s.val(); if(v!==null) $('sc-acu').textContent = v; });
@@ -175,19 +185,26 @@ async function requestJudge(){
   try{
     // Prefer local judge if available (free, sem chaves)
     if(window.localJudgeAnalyze){
-      // stream incremental updates
-      await window.localJudgeAnalyze(msgs, caseObj, async (update)=>{
+      // mark judge pending so user replies trigger re-run
+      if(roomRef) await roomRef.child('judge_pending').set(true);
+      // stream incremental updates and obtain final in one call
+      const final = await window.localJudgeAnalyze(msgs, caseObj, async (update)=>{
         try{
           const text = update?.text || '';
           const meta = update?.meta || {};
           // push partial judge messages so both clients vejam progresso
-          if(roomRef) await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge', _stage:update.stage, _meta:meta });
-          else appendChatMessage({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge' });
+          if(roomRef){
+            await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge', _stage:update.stage, _meta:meta });
+            // if perguntas, persist for UI
+            if(update.stage === 'questions'){
+              await roomRef.child('verdict_questions').set({ perguntas_acu: meta.perguntas_acu || [], perguntas_def: meta.perguntas_def || [] });
+            }
+          } else appendChatMessage({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge' });
         }catch(err){ console.warn('localJudge push failed', err); }
       });
-      // after streaming, set latest verdict snapshot
-      const final = await window.localJudgeAnalyze(msgs, caseObj, ()=>{});
+      // after streaming, set latest verdict snapshot and clear pending
       if(roomRef) await roomRef.child('verdict').set({ text: final.text, ts: Date.now(), verdict: final.verdict });
+      if(roomRef) await roomRef.child('judge_pending').set(false);
     } else {
       // fallback to remote askJudge (ai-bridge)
       const answer = await window.askJudge(caseObj, msgs);
