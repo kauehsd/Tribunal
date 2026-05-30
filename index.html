@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Tribunal do Casal ⚖️ v6</title>
+<title>Tribunal do Casal ⚖️ v7</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=IBM+Plex+Mono:wght@300;400;500&family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -246,7 +246,7 @@ body::before{content:'';position:fixed;inset:0;background:
 /* ══ CHAT ══ */
 #tab-chat{display:none;flex-direction:column;}
 #tab-chat.active{display:flex;}
-.chat-messages{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--b2) transparent;}
+.chat-messages{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 14px 8px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--b2) transparent;min-height:0;}
 .chat-messages::-webkit-scrollbar{width:4px;}
 .chat-messages::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px;}
 .msg{display:flex;flex-direction:column;max-width:85%;animation:fadeUp .2s ease;}
@@ -725,18 +725,6 @@ input:disabled{cursor:not-allowed;opacity:.5;}
       <div class="chat-messages" id="chat-messages">
         <div class="sys-msg">⚖️ Debate iniciado — que comecem os argumentos</div>
       </div>
-      <div class="card" id="judge-question-panel" style="margin:14px 14px 0;">
-        <div class="section-lbl">// perguntas do juiz</div>
-        <div class="judge-question-state" id="judge-question-state">Sem perguntas ativas do juiz no momento.</div>
-        <div class="judge-question-list" id="judge-question-list"></div>
-        <div class="question-answer-wrap">
-          <textarea class="chat-inp" id="question-answer-text" placeholder="Selecione uma pergunta acima e escreva sua resposta aqui..." rows="3"></textarea>
-          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
-            <button class="chat-send" id="question-answer-btn" type="button" onclick="submitJudgeAnswer()" disabled>RESPONDER</button>
-            <button class="btn-secondary" type="button" onclick="clearJudgeQuestionSelection()">CANCELAR</button>
-          </div>
-        </div>
-      </div>
       <div class="typing-ind" id="typing-ind">
         <span id="typing-who"></span> está digitando <span class="typing-dots"><span></span><span></span><span></span></span>
       </div>
@@ -749,9 +737,10 @@ input:disabled{cursor:not-allowed;opacity:.5;}
         <div class="art-quick-row" id="art-quick-row"></div>
         <div class="chat-row">
           <textarea class="chat-inp" id="chat-inp" placeholder="Seu argumento..." rows="1" oninput="onChatInput()" onkeydown="onChatKey(event)"></textarea>
-          <button class="chat-send judge" id="btn-judge" onclick="requestJudge()">JUIZ</button>
+          <button class="chat-send judge" id="btn-judge" onclick="requestJudge()" title="Chamar o Juiz">⚖️</button>
           <button class="chat-send" id="btn-send" onclick="sendMessage()">ENVIAR</button>
         </div>
+        <div style="text-align:center;padding:4px 0 2px;font-family:var(--mono);font-size:9px;color:var(--text3);">⚖️ clique para chamar o juiz · ele também responde automaticamente</div>
       </div>
     </div><!-- /tab-chat -->
 

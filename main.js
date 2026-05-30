@@ -319,30 +319,56 @@ function setupRealtimeListeners(){
 
 function appendChatMessage(msg){
   const container = $('chat-messages'); if(!container) return;
-  const el = document.createElement('div'); el.className = 'msg';
-  if(msg.type==='judge') el.classList.add('judge'); else if(msg.sender===state.myName) el.classList.add('mine'); else el.classList.add('theirs');
+  // evitar duplicatas por ts+sender
+  const msgId = `${msg.ts}-${msg.sender}`;
+  if(container.querySelector(`[data-msgid="${msgId}"]`)) return;
+  const el = document.createElement('div'); el.className = 'msg'; el.dataset.msgid = msgId;
+  const isJudge = msg.type==='judge' || msg.role==='juiz';
+  if(isJudge) el.classList.add('judge');
+  else if(msg.sender===state.myName) el.classList.add('mine');
+  else el.classList.add('theirs');
   const roleCls = msg.role==='acusacao'?'acusacao':(msg.role==='defesa'?'defesa':'');
-  if(msg.type!=='judge') el.classList.add(roleCls);
-  const header = `<div class="msg-header"><span class="msg-role ${msg.role||''}">${msg.sender}</span><span class="msg-time">${new Date(msg.ts||Date.now()).toLocaleTimeString()}</span></div>`;
-  const bubble = `<div class="msg-bubble">${escapeHtml(msg.text).replace(/\n/g,'<br>')}</div>`;
+  if(!isJudge) el.classList.add(roleCls);
+  const time = new Date(msg.ts||Date.now()).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  // skip placeholder "(analisando...)"
+  if(msg.text && msg.text.includes('analisando...') && isJudge) return;
+  let bubbleContent = escapeHtml(msg.text||'').replace(/\n/g,'<br>');
+  let header, bubble;
+  if(isJudge){
+    header = `<div class="msg-header"><span class="msg-role juiz">⚖️ Juiz</span><span class="msg-time">${time}</span></div>`;
+    bubble = `<div class="msg-bubble">${bubbleContent}</div>`;
+  } else {
+    header = `<div class="msg-header"><span class="msg-role ${roleCls}">${escapeHtml(msg.sender||'')}</span><span class="msg-time">${time}</span></div>`;
+    bubble = `<div class="msg-bubble">${bubbleContent}</div>`;
+  }
   el.innerHTML = header + bubble;
   container.appendChild(el); container.scrollTop = container.scrollHeight;
+  // notificação se não estiver na aba de chat
+  const chatTab = document.querySelector('.btab[data-tab="chat"]');
+  if(chatTab && !chatTab.classList.contains('active') && !isJudge){
+    const notif = $('chat-notif'); if(notif) notif.classList.add('show');
+  }
 }
 
 function escapeHtml(s){ return (s||'').replace(/[&<>\"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
 
+let msgCountSinceJudge = 0;
+
 async function sendMessage(){
   const ta = $('chat-inp'); if(!ta) return; const text = ta.value.trim(); if(!text) return;
   const moderation = moderateText(text);
-  if(moderation.blocked){ showToast(`⚠️ Palavra sensível detectada: ${moderation.word}`); }
-  ta.value='';
-  const msg = { sender: state.myName, role: state.myRole, text, ts: Date.now() };
-  if(roomRef){ await roomRef.child('chat').push({ ...msg, type:'chat' }); }
+  if(moderation.blocked){ showToast(`⚠️ Palavra sensível detectada: ${moderation.word}`); return; }
+  ta.value=''; ta.style.height='auto';
+  const msg = { sender: state.myName, role: state.myRole, text, ts: Date.now(), type:'chat' };
+  if(roomRef){ await roomRef.child('chat').push(msg); }
   else { appendChatMessage(msg); }
 
-  const judgeTrigger = /(?:\bjuiz\b|\bjuí?z\b|@juiz)/i;
-  if(judgeTrigger.test(text)){
-    requestJudge();
+  msgCountSinceJudge++;
+  const judgeTrigger = /(?:\bjuiz\b|\bjuí?z\b|@juiz|juíza)/i;
+  // chamar juiz se mencionado explicitamente OU a cada 4 mensagens automaticamente
+  if(judgeTrigger.test(text) || msgCountSinceJudge >= 4){
+    msgCountSinceJudge = 0;
+    setTimeout(()=>requestJudge(), 600);
   }
 }
 
@@ -369,8 +395,8 @@ async function requestJudge(){
   if(chatSnapshot && chatSnapshot.val()){ Object.values(chatSnapshot.val()).forEach(m=> msgs.push({ sender:m.sender, role:m.role, text:m.text })); }
   // local case object
   const caseObj = window.CASES && window.CASES[state.caseIdx] ? window.CASES[state.caseIdx] : { titulo:'Caso genérico', context_juiz:'' };
-  // append a placeholder judge message
-  if(roomRef) await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:'(analisando...)', ts:Date.now(), type:'judge' });
+  // mostrar typing indicator
+  const typingEl = $('typing-ind'); if(typingEl){ $('typing-who').textContent='Juiz'; typingEl.classList.add('show'); }
   try{
     // Prefer local judge if available (free, sem chaves)
     if(window.localJudgeAnalyze){
@@ -394,6 +420,7 @@ async function requestJudge(){
       // after streaming, set latest verdict snapshot and clear pending
       if(roomRef) await roomRef.child('verdict').set({ text: final.text, ts: Date.now(), verdict: final.verdict });
       if(roomRef) await roomRef.child('judge_pending').set(false);
+      const typingEl2 = $('typing-ind'); if(typingEl2) typingEl2.classList.remove('show');
     } else {
       // fallback to remote askJudge (ai-bridge)
       const answer = await window.askJudge(caseObj, msgs);
@@ -402,7 +429,9 @@ async function requestJudge(){
     }
   }catch(e){
     console.error('judge request failed', e);
-    if(roomRef) await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:'(Falha ao consultar Juiz — tente novamente)', ts:Date.now(), type:'judge' });
+    const typingEl3 = $('typing-ind'); if(typingEl3) typingEl3.classList.remove('show');
+    const errMsg = { sender:'Juiz', role:'juiz', text:'⚠️ Falha ao consultar o Juiz. Tente novamente clicando em ⚖️', ts:Date.now(), type:'judge' };
+    if(roomRef) await roomRef.child('chat').push(errMsg); else appendChatMessage(errMsg);
   }
 }
 
@@ -508,7 +537,12 @@ function backToLobby(){
   if(roomRef) { roomRef.off(); roomRef = null; }
 }
 
-function showTab(tab){ document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active', p.id===`tab-${tab}`)); document.querySelectorAll('.btab').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab)); }
+function showTab(tab){ 
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active', p.id===`tab-${tab}`)); 
+  document.querySelectorAll('.btab').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  if(tab==='chat'){ const notif=$('chat-notif'); if(notif) notif.classList.remove('show'); const msgs=$('chat-messages'); if(msgs) msgs.scrollTop=msgs.scrollHeight; }
+  if(tab==='veredito'){ renderVerdict(null); if(roomRef){ roomRef.child('verdict').once('value').then(s=>{ const v=s.val(); if(v) renderVerdict(v); }).catch(()=>{}); } }
+}
 
 function onChatInput(){ const ta = $('chat-inp'); if(ta) ta.style.height = 'auto'; if(ta) ta.style.height = Math.min(120, ta.scrollHeight)+'px'; }
 function onChatKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); } }
