@@ -289,6 +289,28 @@ function setupRealtimeListeners(){
   roomRef.child('ia_chat').on('child_added', snap => { const msg = snap.val(); if(!msg) return; appendIaMessage(msg); });
   // verdict
   roomRef.child('verdict').on('value', s=>{ const v = s.val(); if(v) renderVerdict(v); });
+  // pedidos do parceiro — sincroniza campos do adversário
+  roomRef.child('pedidos').on('value', s => {
+    const pedidos = s.val() || {};
+    const acu = $('pena-acu'); const def = $('pena-def');
+    const acuTxt = $('pedido-acu-txt'); const defTxt = $('pedido-def-txt');
+    if(pedidos.acu !== undefined){
+      if(acu && state.myRole !== 'acusacao') acu.value = pedidos.acu;
+      if(acuTxt) acuTxt.textContent = pedidos.acu || 'Aguardando...';
+    }
+    if(pedidos.def !== undefined){
+      if(def && state.myRole !== 'defesa') def.value = pedidos.def;
+      if(defTxt) defTxt.textContent = pedidos.def || 'Aguardando...';
+    }
+    // notificação quando ambos preencheram
+    const pedidoNotif = $('pedido-notif');
+    if(pedidoNotif) pedidoNotif.classList.toggle('show', Boolean(pedidos.acu && pedidos.def));
+    const syncStatus = $('pedido-sync-status');
+    if(syncStatus){
+      if(pedidos.acu && pedidos.def) syncStatus.innerHTML = '<span class="pedido-sync-dot"></span>Ambos os pedidos registrados — vá para ⚖️ VEREDITO';
+      else syncStatus.textContent = 'Aguardando o outro lado preencher...';
+    }
+  });
   // presence
   presenceRef = roomRef.child('presence/' + localClientId);
   presenceRef.set({ name: state.myName, role: state.myRole, ts: firebase.database.ServerValue.TIMESTAMP });
@@ -386,11 +408,11 @@ async function requestJudge(){
 
 // render mais rico: inclui perguntas do juiz se existirem (salvas em verdict_questions)
 async function renderVerdictRich(v){ const wrap = $('verdict-wrap'); if(!wrap) return; let questionsHtml = '';
-  if(!v || !v.text){ wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Aguardando veredicto</div></div></div><div class="verdict-fund">Nenhum veredito registrado ainda. Use a aba <strong>DEBATE</strong> e clique em <strong>JUIZ</strong> para iniciar a análise. Você também pode pedir uma resposta por perguntas do juiz.</div><div style="margin-top:16px;text-align:center;"><button class="btn-primary" onclick="requestJudge()">Pedir veredicto</button></div></div>`; return; }
+  if(!v || !v.text){ wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Aguardando veredicto</div></div></div><div class="verdict-fund">Nenhum veredito registrado ainda. Use a aba <strong>DEBATE</strong> e clique em <strong>JUIZ</strong> para iniciar a análise.</div><div style="margin-top:16px;text-align:center;"><button class="btn-primary" style="max-width:280px;margin:0 auto;" onclick="requestJudge()">⚖️ Pedir Veredicto Agora</button></div></div>`; return; }
   let q = v.questions || null;
-  if(!q && roomRef){ const snap = await roomRef.child('verdict_questions').once('value'); q = snap.val(); }
-  if(q){ const acu = (q.perguntas_acu||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); const def = (q.perguntas_def||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); questionsHtml = `<div class="verdict-questions"><div class="q-block"><div class="q-label">Perguntas para a Acusação</div>${acu}</div><div class="q-block"><div class="q-label">Perguntas para a Defesa</div>${def}</div></div>`; }
-  wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div>${questionsHtml}</div>`;
+  if(!q && roomRef){ try{ const snap = await roomRef.child('verdict_questions').once('value'); q = snap.val(); }catch(e){} }
+  if(q){ const acu = (q.perguntas_acu||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); const def = (q.perguntas_def||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); questionsHtml = `<div style="margin-top:14px;"><div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.08em;margin-bottom:8px;">// PERGUNTAS DO JUIZ</div><div class="art-strategy-block asb-acu"><div class="asb-label">Para Acusação</div>${acu||'<div class=\"art-texto\">—</div>'}</div><div class="art-strategy-block asb-def" style="margin-top:8px;"><div class="asb-label">Para Defesa</div>${def||'<div class=\"art-texto\">—</div>'}</div></div>`; }
+  wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div>${questionsHtml}<div style="margin-top:16px;text-align:center;"><button class="btn-secondary" onclick="requestJudge()" style="max-width:220px;margin:0 auto;">↺ Nova análise</button></div></div>`;
 }
 
 // backward-compatible entry
@@ -457,13 +479,15 @@ function launchGame(){
   showTab('caso');
   showNotasTab('pad');
   const caseObj = window.CASES && window.CASES[state.caseIdx];
-  if(caseObj){
-    renderCaseDetails(caseObj);
-  }
+  if(caseObj){ renderCaseDetails(caseObj); }
   updateNotasCount();
   renderJudgeQuestions();
+  // inicializar veredito com estado vazio (mostra botão de pedir)
+  renderVerdict(null);
   $('gtb-title').textContent = `Sala ${state.roomCode} • ${caseObj?caseObj.nome:''}`;
   $('gtb-role-txt').textContent = state.myRole==='acusacao'?'ACUSAÇÃO':'DEFESA';
+  const badge = $('gtb-badge');
+  if(badge) badge.className = `gtb-badge ${state.myRole}`;
 }
 
 function selectCase(i){ if(window.CASES){ state.caseIdx = i; document.querySelectorAll('.case-chip').forEach((el,j)=>el.classList.toggle('active',j===i)); const caseObj = window.CASES[i]; if(caseObj){ renderCaseDetails(caseObj); const title = $('gtb-title'); if(title) title.textContent = `Sala ${state.roomCode} • ${caseObj.nome}`; } }}
