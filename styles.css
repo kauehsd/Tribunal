@@ -1,0 +1,24 @@
+*{box-sizing:border-box;font-family:Inter, system-ui, Arial, sans-serif}
+body{background:#08080e;color:#e8e4d8;margin:0;padding:20px}
+.app{max-width:980px;margin:0 auto}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#apikey-box{display:flex;align-items:center;gap:8px}
+#inp-apikey{padding:8px;border-radius:6px;border:1px solid #333;background:#0f0f18;color:#e8e4d8}
+.messages{background:#0f0f18;border:1px solid #222;padding:12px;height:360px;overflow:auto;border-radius:10px;margin:14px 0}
+.message{padding:8px;border-radius:8px;margin-bottom:8px}
+.message.mine{background:#1c1c27;text-align:right}
+.message.judge{background:linear-gradient(135deg,#c9953a33,#e8b45a22);border:1px solid rgba(201,149,58,.15)}
+.chat-input{display:flex;gap:8px}
+#chat-inp{flex:1;padding:8px;border-radius:8px;border:1px solid #222;background:#0b0b10;color:#e8e4d8;min-height:60px}
+button{background:#c9953a;border:none;padding:8px 10px;border-radius:8px;color:#120f03;cursor:pointer}
+button.secondary{background:#333;color:#e8e4d8}
+.case-panel{background:#0f0f18;border:1px solid #222;padding:12px;border-radius:10px;margin:12px 0}
+footer{margin-top:12px;color:#8a8478}
+
+/* hide screens and tabs until activated */
+.screen{display:none}
+.screen.active{display:block}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+.notas-panel{display:none}
+.notas-panel.active{display:block}

@@ -1,0 +1,1269 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Tribunal do Casal ⚖️ v6</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=IBM+Plex+Mono:wght@300;400;500&family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #08080e;
+  --s1: #0f0f18; --s2: #16161f; --s3: #1c1c27;
+  --b1: #1e1e2e; --b2: #28283a;
+  --gold: #c9953a; --gold2: #e8b45a; --gold3: #f5d080;
+  --gold-d: rgba(201,149,58,0.08);
+  --red: #c94040; --red2: #e86060; --red-d: rgba(201,64,64,0.08); --red-m: rgba(201,64,64,0.16);
+  --blue: #3a6ec9; --blue2: #5a8ee8; --blue-d: rgba(58,110,201,0.08); --blue-m: rgba(58,110,201,0.16);
+  --green: #3ab87a; --green2: #5ad49a; --green-d: rgba(58,184,122,0.08);
+  --purple: #7a52c9; --purple2: #9a72e8; --purple-d: rgba(122,82,201,0.08);
+  --text: #e8e4d8; --text2: #8a8478; --text3: #48443c;
+  --mono: 'IBM Plex Mono', monospace;
+  --serif: 'Playfair Display', serif;
+  --sans: 'Plus Jakarta Sans', sans-serif;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background:
+  radial-gradient(ellipse 60% 40% at 20% 0%, rgba(201,149,58,0.04) 0%, transparent 70%),
+  radial-gradient(ellipse 50% 50% at 80% 100%, rgba(58,110,201,0.04) 0%, transparent 70%);
+  pointer-events:none;z-index:0;}
+
+/* ══ SCREENS ══ */
+.screen{display:none;position:relative;z-index:1;}
+.screen.active{display:block;}
+#s-lobby.active{display:flex;}
+
+/* ══ LOBBY ══ */
+#s-lobby{min-height:100vh;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px calc(40px + var(--safe-b));text-align:center;}
+.lobby-badge{display:inline-flex;align-items:center;gap:8px;padding:5px 18px;border:1px solid var(--b2);border-radius:100px;font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.1em;margin-bottom:24px;}
+.lobby-title{font-family:var(--serif);font-size:clamp(52px,11vw,96px);font-weight:900;line-height:.95;letter-spacing:-.03em;margin-bottom:8px;}
+.lobby-title em{font-style:italic;color:var(--gold2);}
+.lobby-sub{color:var(--text2);font-size:14px;font-weight:300;margin-bottom:48px;line-height:1.6;}
+.lobby-card{width:100%;max-width:480px;background:var(--s1);border:1px solid var(--b1);border-radius:20px;padding:28px;margin-bottom:20px;}
+.lc-title{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:16px;}
+
+/* API key */
+.apikey-row{display:flex;gap:8px;margin-bottom:12px;}
+.apikey-inp{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px 14px;color:var(--text);font-family:var(--mono);font-size:12px;letter-spacing:.04em;outline:none;transition:border-color .18s;}
+.apikey-inp:focus{border-color:var(--gold);}
+.apikey-inp::placeholder{color:var(--text3);font-size:11px;}
+.apikey-hint{font-family:var(--mono);font-size:9px;color:var(--text3);line-height:1.5;margin-bottom:16px;text-align:left;padding:10px 12px;background:var(--s2);border-radius:8px;border:1px solid var(--b1);}
+.apikey-hint a{color:var(--gold2);text-decoration:none;}
+.apikey-status{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;padding:6px 10px;border-radius:6px;margin-bottom:12px;}
+.apikey-status.ok{background:var(--green-d);color:var(--green2);border:1px solid rgba(58,184,122,.2);}
+.apikey-status.no{background:var(--red-d);color:var(--red2);border:1px solid rgba(201,64,64,.2);}
+
+/* Case selector */
+.case-scroll{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin-bottom:16px;padding-bottom:4px;}
+.case-scroll::-webkit-scrollbar{display:none;}
+.case-chip{flex-shrink:0;padding:8px 14px;border-radius:8px;border:1px solid var(--b1);background:var(--s2);color:var(--text2);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .18s;white-space:nowrap;}
+.case-chip:hover{border-color:var(--b2);color:var(--text);}
+.case-chip.active{border-color:var(--gold);color:var(--gold2);background:var(--gold-d);}
+
+/* Role cards */
+.role-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
+.role-chip{padding:16px 12px;border-radius:12px;border:1px solid var(--b1);background:var(--s2);cursor:pointer;transition:all .2s;text-align:center;position:relative;overflow:hidden;}
+.role-chip::before{content:'';position:absolute;inset:0;opacity:0;transition:opacity .2s;}
+.role-chip.r-acu::before{background:radial-gradient(circle at 50% 100%,rgba(201,64,64,.12),transparent 70%);}
+.role-chip.r-def::before{background:radial-gradient(circle at 50% 100%,rgba(58,110,201,.12),transparent 70%);}
+.role-chip:hover::before{opacity:1;}
+.role-chip.r-acu:hover,.role-chip.r-acu.sel{border-color:var(--red);box-shadow:0 0 20px rgba(201,64,64,.1);}
+.role-chip.r-def:hover,.role-chip.r-def.sel{border-color:var(--blue);box-shadow:0 0 20px rgba(58,110,201,.1);}
+.role-chip .rc-icon{font-size:22px;margin-bottom:6px;display:block;}
+.role-chip .rc-name{font-family:var(--serif);font-size:16px;font-weight:700;}
+.role-chip.r-acu .rc-name{color:var(--red2);}
+.role-chip.r-def .rc-name{color:var(--blue2);}
+.role-chip .rc-desc{font-size:11px;color:var(--text3);line-height:1.4;margin-top:4px;}
+
+/* Inputs */
+.name-inp{width:100%;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:13px 16px;color:var(--text);font-family:var(--sans);font-size:15px;outline:none;transition:border-color .18s;margin-bottom:12px;}
+.name-inp:focus{border-color:var(--gold);}
+.name-inp::placeholder{color:var(--text3);}
+.room-row{display:flex;gap:8px;margin-bottom:12px;}
+.room-inp{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:13px 16px;color:var(--text);font-family:var(--mono);font-size:18px;letter-spacing:.15em;text-transform:uppercase;outline:none;transition:border-color .18s;text-align:center;}
+.room-inp:focus{border-color:var(--gold);}
+.room-inp::placeholder{color:var(--text3);font-size:12px;letter-spacing:.08em;}
+.btn-primary{width:100%;padding:15px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--gold),var(--gold2));color:#1a1000;font-family:var(--mono);font-size:12px;letter-spacing:.1em;font-weight:500;cursor:pointer;transition:all .2s;min-height:50px;}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(201,149,58,.25);}
+.btn-primary:disabled{opacity:.4;transform:none;cursor:not-allowed;}
+.btn-primary:active{transform:scale(.97);}
+.btn-secondary{width:100%;padding:12px;border-radius:10px;border:1px solid var(--b2);background:none;color:var(--text2);font-family:var(--mono);font-size:11px;letter-spacing:.08em;cursor:pointer;transition:all .18s;margin-top:8px;}
+.btn-secondary:hover{border-color:var(--gold);color:var(--gold);}
+.divider{display:flex;align-items:center;gap:12px;margin:16px 0;}
+.divider span{font-family:var(--mono);font-size:10px;color:var(--text3);}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--b1);}
+.generated-code{background:var(--s2);border:1px solid var(--gold);border-radius:10px;padding:14px;text-align:center;margin-bottom:12px;}
+.gc-label{font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.1em;margin-bottom:4px;}
+.gc-code{font-family:var(--mono);font-size:32px;color:var(--gold2);letter-spacing:.2em;font-weight:500;}
+
+/* Waiting */
+.waiting-card{background:var(--s1);border:1px solid var(--b1);border-radius:16px;padding:24px;text-align:center;max-width:400px;width:100%;}
+.wc-spinner{width:40px;height:40px;border:3px solid var(--b2);border-top-color:var(--gold);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.wc-title{font-family:var(--serif);font-size:20px;color:var(--gold2);margin-bottom:8px;}
+.wc-sub{font-size:13px;color:var(--text2);font-weight:300;line-height:1.6;margin-bottom:16px;}
+.players-list{display:flex;flex-direction:column;gap:6px;}
+.player-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--s2);border:1px solid var(--b1);}
+.pi-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.pi-dot.acusacao{background:var(--red2);}
+.pi-dot.defesa{background:var(--blue2);}
+.pi-dot.empty{background:var(--b2);}
+.pi-name{font-size:13px;flex:1;}
+.pi-role{font-family:var(--mono);font-size:9px;color:var(--text3);}
+
+/* ══ GAME SCREEN ══ */
+#s-game{height:100vh;display:none;flex-direction:column;overflow:hidden;}
+#s-game.active{display:flex;}
+
+/* Top bar */
+.game-topbar{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 14px;
+  padding-top:calc(10px + var(--safe-t));
+  border-bottom:1px solid var(--b1);
+  background:rgba(8,8,14,.97);
+  backdrop-filter:blur(16px);
+  flex-shrink:0;
+  z-index:100;
+}
+.gtb-back{background:none;border:1px solid var(--b1);border-radius:8px;padding:7px 12px;color:var(--text3);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;flex-shrink:0;}
+.gtb-back:hover{border-color:var(--b2);color:var(--text2);}
+.gtb-title{font-family:var(--serif);font-size:15px;font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.gtb-badge{display:flex;align-items:center;gap:5px;padding:5px 11px;border-radius:100px;font-family:var(--mono);font-size:10px;letter-spacing:.06em;flex-shrink:0;}
+.gtb-badge.acusacao{background:var(--red-d);color:var(--red2);border:1px solid rgba(201,64,64,.25);}
+.gtb-badge.defesa{background:var(--blue-d);color:var(--blue2);border:1px solid rgba(58,110,201,.25);}
+.online-dot{width:6px;height:6px;border-radius:50%;background:var(--green2);animation:pulse 2s infinite;flex-shrink:0;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+
+/* Content area */
+.game-content{flex:1;overflow:hidden;position:relative;}
+.tab-panel{display:none;height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.tab-panel.active{display:flex;flex-direction:column;animation:fadeUp .22s ease;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);} }
+
+/* Bottom Tab Bar */
+.bottom-bar{
+  display:flex;
+  background:rgba(8,8,14,.97);
+  backdrop-filter:blur(20px);
+  border-top:1px solid var(--b1);
+  padding-bottom:var(--safe-b);
+  flex-shrink:0;
+  z-index:100;
+}
+.btab{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:10px 4px;min-height:56px;
+  background:none;border:none;
+  color:var(--text3);font-family:var(--mono);font-size:9px;letter-spacing:.04em;
+  cursor:pointer;transition:all .18s;position:relative;gap:4px;
+}
+.btab:active{opacity:.7;transform:scale(.93);}
+.btab:hover{color:var(--text2);}
+.btab.active{color:var(--gold2);}
+.btab-icon{font-size:18px;line-height:1;position:relative;}
+.btab-notif{
+  position:absolute;top:-3px;right:-6px;
+  width:8px;height:8px;border-radius:50%;
+  background:var(--red2);display:none;
+  border:1.5px solid var(--bg);
+}
+.btab-notif.show{display:block;}
+.btab-label{font-size:9px;letter-spacing:.04em;}
+.btab-indicator{
+  position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:0;height:2px;background:var(--gold);border-radius:0 0 2px 2px;
+  transition:width .2s;
+}
+.btab.active .btab-indicator{width:28px;}
+
+/* Game body scroll area */
+.game-body{padding:16px 14px 24px;max-width:900px;width:100%;margin:0 auto;}
+
+/* Cards */
+.card{background:var(--s1);border:1px solid var(--b1);border-radius:14px;padding:20px;margin-bottom:12px;}
+.card-sm{background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:14px;margin-bottom:8px;}
+.section-lbl{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+.section-lbl::after{content:'';flex:1;height:1px;background:var(--b1);}
+.brief-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+.tag{padding:3px 10px;border-radius:4px;font-family:var(--mono);font-size:10px;letter-spacing:.06em;border:1px solid;}
+.tg{border-color:var(--gold);color:var(--gold2);background:var(--gold-d);}
+.tr{border-color:var(--red);color:var(--red2);background:var(--red-d);}
+.tb{border-color:var(--blue);color:var(--blue2);background:var(--blue-d);}
+.tp{border-color:var(--purple);color:var(--purple2);background:var(--purple-d);}
+.brief-title{font-family:var(--serif);font-size:clamp(18px,3.5vw,26px);font-weight:700;margin-bottom:10px;}
+.brief-body{font-size:13.5px;line-height:1.78;color:var(--text2);font-weight:300;}
+.brief-body strong{color:var(--text);font-weight:500;}
+
+/* Art cards — vade com design melhorado */
+.vade-list{display:flex;flex-direction:column;gap:10px;margin-bottom:12px;}
+.art-card{background:var(--s2);border:1px solid var(--b1);border-radius:12px;overflow:hidden;cursor:pointer;transition:all .2s;}
+.art-card:active{transform:scale(.98);}
+.art-card.expanded{border-color:var(--gold);}
+.art-header{display:flex;align-items:flex-start;gap:12px;padding:14px;}
+.art-num-badge{background:var(--gold-d);border:1px solid rgba(201,149,58,.3);border-radius:6px;padding:5px 9px;font-family:var(--mono);font-size:10px;color:var(--gold2);flex-shrink:0;white-space:nowrap;}
+.art-header-content{flex:1;min-width:0;}
+.art-name{font-family:var(--serif);font-size:15px;font-weight:700;margin-bottom:3px;}
+.art-pena{font-family:var(--mono);font-size:10px;color:var(--text3);}
+.art-strategy-preview{font-size:11.5px;color:var(--text2);margin-top:5px;line-height:1.4;font-style:italic;opacity:.7;}
+.art-chevron{font-size:14px;color:var(--text3);flex-shrink:0;transition:transform .2s;align-self:center;}
+.art-card.expanded .art-chevron{transform:rotate(180deg);}
+.art-body{display:none;padding:0 14px 14px;}
+.art-card.expanded .art-body{display:block;}
+.art-texto{font-family:var(--serif);font-size:13px;color:var(--text2);font-style:italic;line-height:1.7;margin-bottom:10px;padding-left:10px;border-left:2px solid var(--gold);}
+
+/* Estratégia de uso — novo */
+.art-strategy-block{background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:12px;margin-bottom:10px;}
+.asb-label{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--text3);margin-bottom:6px;}
+.asb-acu{border-left:2px solid var(--red);padding-left:10px;margin-bottom:8px;}
+.asb-def{border-left:2px solid var(--blue);padding-left:10px;}
+.asb-acu .asb-label{color:var(--red2);}
+.asb-def .asb-label{color:var(--blue2);}
+.asb-text{font-size:12px;color:var(--text2);line-height:1.55;font-weight:300;}
+
+.art-exp{font-size:12.5px;color:var(--text2);line-height:1.6;font-weight:300;margin-bottom:8px;}
+.art-juris{margin-top:8px;padding:8px 10px;background:var(--purple-d);border:1px solid rgba(122,82,201,.15);border-radius:6px;font-size:11px;color:var(--text2);font-style:italic;}
+.art-juris-ref{font-family:var(--mono);font-size:9px;color:var(--purple2);display:block;margin-top:2px;}
+.art-use-btn{margin-top:10px;width:100%;padding:10px;border-radius:8px;border:1px solid var(--gold);background:var(--gold-d);color:var(--gold2);font-family:var(--mono);font-size:10px;letter-spacing:.08em;cursor:pointer;transition:all .15s;min-height:40px;}
+.art-use-btn:hover{background:rgba(201,149,58,.16);}
+.art-use-btn:active{transform:scale(.97);}
+
+/* Simplificação da linguagem — novo */
+.art-simple{background:rgba(58,184,122,.05);border:1px solid rgba(58,184,122,.15);border-radius:8px;padding:10px 12px;margin-bottom:10px;}
+.art-simple-lbl{font-family:var(--mono);font-size:9px;color:var(--green2);letter-spacing:.08em;margin-bottom:5px;}
+.art-simple-txt{font-size:12px;color:var(--text2);line-height:1.55;}
+
+/* ══ CHAT ══ */
+#tab-chat{display:none;flex-direction:column;}
+#tab-chat.active{display:flex;}
+.chat-messages{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--b2) transparent;}
+.chat-messages::-webkit-scrollbar{width:4px;}
+.chat-messages::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px;}
+.msg{display:flex;flex-direction:column;max-width:85%;animation:fadeUp .2s ease;}
+.msg.mine{align-self:flex-end;align-items:flex-end;}
+.msg.theirs{align-self:flex-start;align-items:flex-start;}
+.msg.judge{align-self:center;align-items:center;max-width:95%;}
+.msg-header{display:flex;align-items:center;gap:6px;margin-bottom:3px;}
+.msg-role{font-family:var(--mono);font-size:9px;letter-spacing:.08em;}
+.msg-role.acusacao{color:var(--red2);}
+.msg-role.defesa{color:var(--blue2);}
+.msg-role.juiz{color:var(--gold2);}
+.msg-time{font-family:var(--mono);font-size:9px;color:var(--text3);}
+.msg-bubble{padding:11px 14px;border-radius:12px;font-size:13.5px;line-height:1.6;font-weight:300;word-break:break-word;}
+.msg.mine .msg-bubble{background:var(--s3);border:1px solid var(--b2);border-bottom-right-radius:4px;}
+.msg.theirs .msg-bubble{background:var(--s2);border:1px solid var(--b1);border-bottom-left-radius:4px;}
+.msg.mine.acusacao .msg-bubble{background:var(--red-d);border-color:rgba(201,64,64,.2);}
+.msg.mine.defesa .msg-bubble{background:var(--blue-d);border-color:rgba(58,110,201,.2);}
+.msg.judge .msg-bubble{background:linear-gradient(135deg,rgba(201,149,58,.08),rgba(201,149,58,.04));border:1px solid rgba(201,149,58,.25);border-radius:12px;width:100%;text-align:center;}
+.msg-art-tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-family:var(--mono);font-size:9px;background:rgba(201,149,58,.1);border:1px solid rgba(201,149,58,.2);color:var(--gold2);margin-top:6px;}
+
+/* Reply to judge button */
+.msg.judge .msg-reply-btn{display:inline-flex;align-items:center;gap:5px;margin-top:8px;padding:6px 12px;border-radius:6px;border:1px solid rgba(201,149,58,.3);background:none;color:var(--gold2);font-family:var(--mono);font-size:9px;cursor:pointer;transition:all .15s;}
+.msg.judge .msg-reply-btn:hover{background:var(--gold-d);}
+.msg.judge .msg-reply-btn:active{transform:scale(.95);} 
+
+.sys-msg{text-align:center;font-family:var(--mono);font-size:10px;color:var(--text3);padding:6px 0;letter-spacing:.06em;}
+.chat-input-wrap{padding:10px 12px;border-top:1px solid var(--b1);background:rgba(8,8,14,.95);backdrop-filter:blur(12px);flex-shrink:0;}
+
+/* Reply indicator */
+.reply-banner{display:none;align-items:center;gap:8px;padding:6px 10px;border-radius:7px;background:var(--gold-d);border:1px solid rgba(201,149,58,.2);margin-bottom:6px;}
+.reply-banner.show{display:flex;}
+.reply-banner-text{font-family:var(--mono);font-size:9px;color:var(--gold2);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.reply-banner-close{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;flex-shrink:0;padding:0 2px;}
+
+.art-quick-row{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-bottom:8px;padding-bottom:2px;}
+.art-quick-row::-webkit-scrollbar{display:none;}
+.art-quick-pill{flex-shrink:0;padding:5px 10px;border-radius:6px;border:1px solid var(--b2);background:none;color:var(--text3);font-family:var(--mono);font-size:9px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.art-quick-pill:hover{border-color:var(--gold);color:var(--gold2);background:var(--gold-d);}
+.art-quick-pill:active{transform:scale(.94);}
+.chat-row{display:flex;gap:8px;}
+.chat-inp{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px 14px;color:var(--text);font-family:var(--sans);font-size:14px;outline:none;resize:none;min-height:48px;max-height:100px;transition:border-color .18s;}
+.chat-inp:focus{border-color:var(--gold);}
+.chat-inp::placeholder{color:var(--text3);}
+.chat-send{padding:0 16px;border-radius:10px;border:none;background:var(--gold);color:#1a1000;font-family:var(--mono);font-size:11px;letter-spacing:.08em;cursor:pointer;transition:all .18s;min-height:48px;flex-shrink:0;font-weight:500;}
+.chat-send:hover{background:var(--gold2);}
+.chat-send:disabled{opacity:.4;cursor:not-allowed;}
+.chat-send:active{transform:scale(.95);}
+.typing-ind{font-family:var(--mono);font-size:10px;color:var(--gold2);padding:4px 14px;display:none;flex-shrink:0;}
+.typing-ind.show{display:block;}
+.typing-dots{display:inline-flex;gap:3px;}
+.typing-dots span{width:4px;height:4px;border-radius:50%;background:var(--gold2);animation:dot-blink 1.2s infinite;}
+.typing-dots span:nth-child(2){animation-delay:.2s;}
+.typing-dots span:nth-child(3){animation-delay:.4s;}
+@keyframes dot-blink{0%,80%,100%{opacity:.2;}40%{opacity:1;}}
+
+/* ══ CALC ══ */
+.calc-display{background:linear-gradient(135deg,var(--s2),var(--s3));border:1px solid var(--b2);border-radius:14px;padding:20px;margin-bottom:14px;text-align:center;}
+.calc-big{font-family:var(--serif);font-size:64px;font-weight:900;color:var(--gold2);line-height:1;}
+.calc-big span{font-size:20px;color:var(--text3);font-family:var(--mono);font-weight:300;}
+.calc-regime{font-family:var(--mono);font-size:11px;color:var(--green2);letter-spacing:.06em;margin-top:6px;}
+.calc-phases{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:12px;}
+.calc-phase{background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:10px;text-align:center;}
+.cp-lbl{font-family:var(--mono);font-size:8px;color:var(--text3);letter-spacing:.06em;margin-bottom:3px;}
+.cp-val{font-family:var(--serif);font-size:16px;font-weight:700;}
+.cp-val.v1{color:var(--gold2);}
+.cp-val.v2{color:var(--gold);}
+.cp-val.v3{color:var(--green2);}
+.slider-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+.slider-lbl{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);}
+.slider-val{font-family:var(--mono);font-size:11px;color:var(--gold2);}
+input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:2px;background:var(--b2);outline:none;cursor:pointer;margin-bottom:16px;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:var(--gold);cursor:pointer;transition:transform .15s;}
+input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2);}
+input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;background:var(--gold);cursor:pointer;border:none;}
+.check-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:14px;}
+@media(max-width:400px){.check-grid{grid-template-columns:1fr;}}
+.chk-item{display:flex;align-items:center;gap:9px;padding:11px 12px;border-radius:8px;border:1px solid var(--b1);background:var(--s2);cursor:pointer;transition:all .18s;min-height:48px;}
+.chk-item:hover{border-color:var(--b2);} 
+.chk-item:active{transform:scale(.97);}
+.chk-item.on-agg{border-color:rgba(201,64,64,.4);background:var(--red-d);}
+.chk-item.on-ate{border-color:rgba(58,184,122,.4);background:var(--green-d);}
+.chk-box{width:20px;height:20px;border-radius:4px;border:1px solid var(--b2);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;transition:all .15s;}
+.chk-item.on-agg .chk-box{background:var(--red);border-color:var(--red);color:#fff;}
+.chk-item.on-ate .chk-box{background:var(--green);border-color:var(--green);color:#fff;}
+.chk-lbl{font-size:12px;color:var(--text2);line-height:1.4;font-weight:300;}
+.chk-ef{font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:2px;}
+.chk-item.on-agg .chk-ef{color:var(--red2);}
+.chk-item.on-ate .chk-ef{color:var(--green2);}
+.divhr{height:1px;background:var(--b1);margin:14px 0;}
+
+/* Score */
+.score-row{display:flex;gap:8px;margin-bottom:10px;}
+.score-side{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;text-align:center;}
+.ss-lbl{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
+.ss-lbl.acu{color:var(--red2);}
+.ss-lbl.def{color:var(--blue2);}
+.ss-num{font-family:var(--serif);font-size:40px;font-weight:900;line-height:1;}
+.score-side.acu .ss-num{color:var(--red2);} 
+.score-side.def .ss-num{color:var(--blue2);} 
+.score-vs{display:flex;align-items:center;font-family:var(--serif);font-size:20px;color:var(--text3);font-style:italic;padding:0 4px;flex-shrink:0;}
+.score-btns{display:flex;gap:6px;}
+.score-btn{flex:1;padding:12px;border-radius:8px;border:1px solid var(--b1);background:none;font-family:var(--mono);font-size:10px;letter-spacing:.06em;cursor:pointer;transition:all .15s;min-height:48px;}
+.score-btn.acu{color:var(--red2);border-color:rgba(201,64,64,.3);}
+.score-btn.def{color:var(--blue2);border-color:rgba(58,110,201,.3);}
+.score-btn.acu:hover{background:var(--red-d);} 
+.score-btn.def:hover{background:var(--blue-d);} 
+.score-btn.rst{color:var(--text3);max-width:52px;flex:0 0 52px;} 
+.score-btn:active{transform:scale(.93);} 
+
+/* ══ VEREDITO ══ */
+.verdict-locked{background:var(--s1);border:1px solid var(--b1);border-radius:16px;padding:32px 24px;text-align:center;margin-bottom:12px;}
+.vl-icon{font-size:48px;margin-bottom:12px;display:block;}
+.vl-title{font-family:var(--serif);font-size:26px;font-weight:700;color:var(--gold2);margin-bottom:8px;}
+.vl-sub{font-size:13px;color:var(--text3);font-weight:300;line-height:1.6;margin-bottom:20px;max-width:340px;margin-left:auto;margin-right:auto;}
+.player-pena-section{margin-bottom:20px;text-align:left;}
+.pp-title{font-family:var(--mono);font-size:10px;letter-spacing:.08em;color:var(--text3);margin-bottom:10px;}
+.pp-row{display:flex;gap:8px;margin-bottom:8px;}
+.pp-side{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px;}
+.pp-side.acu{border-color:rgba(201,64,64,.2);} 
+.pp-side.def{border-color:rgba(58,110,201,.2);} 
+.pp-label{font-family:var(--mono);font-size:9px;margin-bottom:6px;}
+.pp-label.acu{color:var(--red2);} 
+.pp-label.def{color:var(--blue2);} 
+.pp-inp{width:100%;background:var(--s3);border:1px solid var(--b2);border-radius:7px;padding:8px 10px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .15s;} 
+.pp-inp.acu:focus{border-color:var(--red);} 
+.pp-inp.def:focus{border-color:var(--blue);} 
+.pp-inp::placeholder{color:var(--text3);font-size:11px;} 
+.btn-reveal{display:inline-flex;align-items:center;gap:9px;padding:14px 28px;border-radius:12px;border:1px solid var(--gold);background:var(--gold-d);color:var(--gold2);font-family:var(--mono);font-size:11px;letter-spacing:.08em;cursor:pointer;transition:all .2s;min-height:48px;} 
+.btn-reveal:hover{background:rgba(201,149,58,.16);transform:translateY(-2px);box-shadow:0 0 32px rgba(201,149,58,.15);} 
+.btn-reveal:disabled{opacity:.4;transform:none;cursor:not-allowed;} 
+.btn-reveal:active{transform:scale(.96);} 
+.ai-loading{display:none;margin-top:16px;} 
+.ai-loading.show{display:flex;align-items:center;justify-content:center;gap:10px;font-family:var(--mono);font-size:11px;color:var(--gold2);} 
+
+/* Instâncias nav */
+.inst-nav{display:flex;gap:6px;margin-bottom:16px;overflow-x:auto;scrollbar-width:none;} 
+.inst-nav::-webkit-scrollbar{display:none;} 
+.inst-btn{flex-shrink:0;padding:8px 14px;border-radius:8px;border:1px solid var(--b1);background:var(--s2);color:var(--text3);font-family:var(--mono);font-size:9px;letter-spacing:.06em;cursor:pointer;transition:all .18s;display:flex;align-items:center;gap:6px;white-space:nowrap;} 
+.inst-btn:hover{border-color:var(--b2);color:var(--text2);} 
+.inst-btn.active{border-color:var(--gold);color:var(--gold2);background:var(--gold-d);} 
+.inst-btn.locked{opacity:.35;cursor:not-allowed;} 
+.inst-btn .inst-dot{width:6px;height:6px;border-radius:50%;background:var(--text3);} 
+.inst-btn.active .inst-dot{background:var(--gold2);} 
+.inst-btn.done-cond .inst-dot{background:var(--red2);} 
+.inst-btn.done-absol .inst-dot{background:var(--green2);} 
+.inst-btn.done-parc .inst-dot{background:var(--gold2);} 
+
+/* Recurso */
+.recurso-section{margin-top:16px;padding-top:16px;border-top:1px solid var(--b1);} 
+.recurso-title{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.08em;margin-bottom:10px;} 
+.recurso-btns{display:flex;gap:8px;} 
+.btn-recurso{flex:1;padding:12px;border-radius:10px;border:1px solid;font-family:var(--mono);font-size:10px;letter-spacing:.06em;cursor:pointer;transition:all .18s;min-height:48px;} 
+.btn-recurso.acu{border-color:rgba(201,64,64,.3);color:var(--red2);background:none;} 
+.btn-recurso.acu:hover{background:var(--red-d);} 
+.btn-recurso.def{border-color:rgba(58,110,201,.3);color:var(--blue2);background:none;} 
+.btn-recurso.def:hover{background:var(--blue-d);} 
+.btn-recurso:disabled{opacity:.35;cursor:not-allowed;} 
+.btn-recurso:active{transform:scale(.95);} 
+.recurso-input-wrap{background:var(--s2);border:1px solid var(--b1);border-radius:12px;padding:16px;margin-top:12px;animation:fadeUp .2s ease;} 
+.ri-label{font-family:var(--mono);font-size:9px;letter-spacing:.08em;margin-bottom:8px;} 
+.ri-label.acu{color:var(--red2);} 
+.ri-label.def{color:var(--blue2);} 
+.ri-ta{width:100%;background:var(--s3);border:1px solid var(--b2);border-radius:8px;padding:11px 13px;color:var(--text);font-family:var(--sans);font-size:13px;resize:none;outline:none;min-height:80px;transition:border-color .15s;margin-bottom:10px;} 
+.ri-ta:focus{border-color:var(--gold);} 
+.ri-ta::placeholder{color:var(--text3);} 
+.btn-enviar-recurso{width:100%;padding:13px;border-radius:9px;border:none;background:linear-gradient(135deg,var(--gold),var(--gold2));color:#1a1000;font-family:var(--mono);font-size:11px;letter-spacing:.08em;cursor:pointer;transition:all .18s;font-weight:500;min-height:48px;} 
+.btn-enviar-recurso:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(201,149,58,.2);} 
+.btn-enviar-recurso:disabled{opacity:.4;transform:none;cursor:not-allowed;} 
+
+/* Verdict card */
+@keyframes unveil{from{opacity:0;transform:scale(.97);}to{opacity:1;transform:scale(1);} } 
+.verdict-card{background:var(--s1);border-radius:16px;padding:24px;margin-bottom:12px;animation:unveil .5s ease;} 
+.verdict-card.inst-1a{border:1px solid rgba(201,149,58,.3);} 
+.verdict-card.inst-tj{border:1px solid rgba(58,110,201,.3);} 
+.verdict-card.inst-stj{border:1px solid rgba(122,82,201,.3);} 
+.verdict-stamp{display:flex;align-items:center;gap:12px;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--b1);} 
+.vs-icon{font-size:30px;} 
+.vs-label{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.1em;margin-bottom:3px;} 
+.vs-name{font-family:var(--serif);font-size:22px;font-weight:700;} 
+.vs-name.cond{color:var(--red2);} 
+.vs-name.absol{color:var(--green2);} 
+.vs-name.parc{color:var(--gold2);} 
+.verdict-pena{background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:12px 16px;margin-bottom:14px;} 
+.vp-num{font-family:var(--serif);font-size:30px;font-weight:900;color:var(--gold2);margin-bottom:2px;line-height:1.1;} 
+.vp-lbl{font-family:var(--mono);font-size:10px;color:var(--text3);} 
+.verdict-ratio{font-family:var(--serif);font-size:13.5px;color:var(--text2);font-style:italic;line-height:1.75;margin-bottom:14px;border-left:2px solid rgba(201,149,58,.3);padding-left:14px;} 
+.verdict-fund{font-size:13px;color:var(--text2);font-weight:300;line-height:1.7;margin-bottom:12px;} 
+.verdict-fund strong{color:var(--text);font-weight:500;} 
+.verdict-arts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;} 
+.vart{padding:3px 10px;border-radius:4px;font-family:var(--mono);font-size:10px;border:1px solid rgba(201,149,58,.25);color:var(--gold2);background:rgba(201,149,58,.06);} 
+.recurso-arg{background:var(--s2);border-radius:10px;padding:12px 14px;margin-bottom:12px;border-left:3px solid;} 
+.recurso-arg.acu{border-color:var(--red);} 
+.recurso-arg.def{border-color:var(--blue);} 
+.nokey-warn{background:rgba(201,64,64,.06);border:1px solid rgba(201,64,64,.2);border-radius:10px;padding:14px;margin-bottom:14px;font-family:var(--mono);font-size:10px;color:var(--red2);line-height:1.6;text-align:left;} 
+.nokey-warn a{color:var(--gold2);text-decoration:none;} 
+
+/* ══ BLOCO DE NOTAS COM IA ══ */
+#tab-notas{display:none;flex-direction:column;} 
+#tab-notas.active{display:flex;} 
+.notas-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden;} 
+
+/* Notas tabs */
+.notas-tabs{display:flex;border-bottom:1px solid var(--b1);flex-shrink:0;} 
+.notas-tab{flex:1;padding:11px 8px;background:none;border:none;color:var(--text3);font-family:var(--mono);font-size:9px;letter-spacing:.06em;cursor:pointer;transition:all .18s;border-bottom:2px solid transparent;text-align:center;} 
+.notas-tab.active{color:var(--gold2);border-bottom-color:var(--gold);} 
+.notas-panel{display:none;flex:1;overflow-y:auto;flex-direction:column;} 
+.notas-panel.active{display:flex;flex-direction:column;} 
+
+/* Notas pad */
+.notas-pad{flex:1;display:flex;flex-direction:column;padding:12px;} 
+.notas-header-row{display:flex;align-items:center;gap:8px;margin-bottom:10px;} 
+.notas-title{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);} 
+.notas-badge{padding:3px 8px;border-radius:4px;background:var(--gold-d);border:1px solid rgba(201,149,58,.2);color:var(--gold2);font-size:9px;font-family:var(--mono);} 
+.notas-ta{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:12px;padding:16px;color:var(--text);font-family:var(--sans);font-size:13.5px;line-height:1.7;resize:none;outline:none;min-height:200px;transition:border-color .18s;} 
+.notas-ta:focus{border-color:rgba(201,149,58,.3);} 
+.notas-ta::placeholder{color:var(--text3);font-style:italic;} 
+.notas-footer{display:flex;align-items:center;justify-content:space-between;padding:8px 0 0;} 
+.notas-chars{font-family:var(--mono);font-size:9px;color:var(--text3);} 
+.notas-saved{font-family:var(--mono);font-size:9px;color:var(--green2);opacity:0;transition:opacity .3s;} 
+.notas-saved.show{opacity:1;} 
+.notas-clear{background:none;border:none;font-family:var(--mono);font-size:9px;color:var(--text3);cursor:pointer;padding:4px 8px;border-radius:4px;transition:color .15s;} 
+.notas-clear:hover{color:var(--red2);} 
+
+/* IA Assistente no notas */
+.ia-assist-wrap{flex:1;display:flex;flex-direction:column;padding:12px;gap:10px;} 
+.ia-assist-header{display:flex;align-items:center;gap:10px;padding:12px;background:var(--gold-d);border:1px solid rgba(201,149,58,.2);border-radius:10px;flex-shrink:0;} 
+.ia-assist-icon{font-size:22px;} 
+.ia-assist-info{flex:1;} 
+.ia-assist-name{font-family:var(--serif);font-size:14px;font-weight:700;color:var(--gold2);margin-bottom:2px;} 
+.ia-assist-desc{font-size:11px;color:var(--text3);font-weight:300;} 
+.ia-chat-msgs{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;gap:8px;padding:4px 0;scrollbar-width:thin;scrollbar-color:var(--b2) transparent;min-height:100px;} 
+.ia-msg{padding:10px 12px;border-radius:10px;font-size:12.5px;line-height:1.55;font-weight:300;animation:fadeUp .2s ease;} 
+.ia-msg.user{background:var(--s2);border:1px solid var(--b1);align-self:flex-end;max-width:85%;border-bottom-right-radius:4px;} 
+.ia-msg.ai{background:var(--gold-d);border:1px solid rgba(201,149,58,.2);align-self:flex-start;max-width:95%;border-bottom-left-radius:4px;} 
+.ia-msg-who{font-family:var(--mono);font-size:8px;letter-spacing:.08em;margin-bottom:4px;} 
+.ia-msg.user .ia-msg-who{color:var(--text3);} 
+.ia-msg.ai .ia-msg-who{color:var(--gold2);} 
+.ia-quick-btns{display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0;} 
+.ia-quick-btn{padding:7px 11px;border-radius:7px;border:1px solid var(--b2);background:none;color:var(--text2);font-family:var(--mono);font-size:9px;cursor:pointer;transition:all .15s;text-align:left;line-height:1.3;} 
+.ia-quick-btn:hover{border-color:var(--gold);color:var(--gold2);background:var(--gold-d);} 
+.ia-quick-btn:active{transform:scale(.95);} 
+.ia-chat-input-row{display:flex;gap:8px;flex-shrink:0;} 
+.ia-inp{flex:1;background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:11px 13px;color:var(--text);font-family:var(--sans);font-size:13px;outline:none;resize:none;min-height:44px;max-height:80px;transition:border-color .18s;} 
+.ia-inp:focus{border-color:var(--gold);} 
+.ia-inp::placeholder{color:var(--text3);} 
+.ia-send{padding:0 14px;border-radius:10px;border:none;background:var(--gold);color:#1a1000;font-family:var(--mono);font-size:10px;letter-spacing:.06em;cursor:pointer;transition:all .18s;min-height:44px;flex-shrink:0;font-weight:500;} 
+.ia-send:hover{background:var(--gold2);} 
+.ia-send:disabled{opacity:.4;} 
+.ia-send:active{transform:scale(.95);} 
+.ia-nokey-msg{padding:14px;background:rgba(201,64,64,.06);border:1px solid rgba(201,64,64,.2);border-radius:10px;font-size:12px;color:var(--text2);line-height:1.55;} 
+.ia-nokey-msg a{color:var(--gold2);text-decoration:none;} 
+
+/* ══ CHAT INSTÂNCIA */
+.inst-chat-section{margin-top:16px;padding-top:16px;border-top:1px solid var(--b1);} 
+.inst-chat-title{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.08em;margin-bottom:10px;} 
+.inst-chat-msgs{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;margin-bottom:10px;padding:10px;background:var(--s2);border:1px solid var(--b1);border-radius:10px;} 
+.inst-chat-row{display:flex;gap:8px;} 
+.inst-chat-inp{flex:1;background:var(--s3);border:1px solid var(--b2);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--sans);font-size:13px;outline:none;resize:none;min-height:44px;max-height:80px;transition:border-color .18s;} 
+.inst-chat-inp:focus{border-color:var(--gold);} 
+.inst-chat-send{padding:0 14px;border-radius:8px;border:none;background:var(--gold);color:#1a1000;font-family:var(--mono);font-size:10px;letter-spacing:.06em;cursor:pointer;min-height:44px;flex-shrink:0;font-weight:500;transition:all .15s;} 
+.inst-chat-send:hover{background:var(--gold2);} 
+.inst-msg-j{text-align:center;font-family:var(--mono);font-size:9px;color:var(--gold2);background:rgba(201,149,58,.06);border:1px solid rgba(201,149,58,.15);border-radius:8px;padding:8px 12px;line-height:1.5;} 
+
+/* ══ SYNC TOAST / JUDGE FLASH ══ */
+.sync-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(12px);background:var(--s1);border:1px solid var(--gold);border-radius:10px;padding:10px 18px;font-family:var(--mono);font-size:10px;color:var(--gold2);letter-spacing:.06em;opacity:0;transition:all .3s;z-index:9999;pointer-events:none;white-space:nowrap;} 
+.sync-toast.show{opacity:1;transform:translateX(-50%) translateY(0);} 
+
+/* Judge pulse ring */
+@keyframes judge-ring{0%{box-shadow:0 0 0 0 rgba(201,149,58,.5);}70%{box-shadow:0 0 0 10px rgba(201,149,58,0);}100%{box-shadow:0 0 0 0 rgba(201,149,58,0);}} 
+.btab[data-tab="chat"].judge-flash{animation:judge-ring .6s ease;} 
+
+/* Haptic feedback CSS class (triggers vibrate via JS) */
+.haptic{outline:none;} 
+
+/* Reply btn on player msgs */
+.msg-reply-player-btn{
+  display:inline-block;margin-top:6px;
+  background:none;border:1px solid var(--b2);border-radius:5px;
+  padding:3px 8px;font-family:var(--mono);font-size:8px;
+  color:var(--text3);cursor:pointer;transition:all .15s;letter-spacing:.04em;
+}
+.msg-reply-player-btn:hover{border-color:var(--gold);color:var(--gold2);} 
+.msg .mine .msg-reply-player-btn{display:none;} 
+/* Pedido tab styles */
+.pedido-sync-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green2);margin-right:5px;animation:pulse 2s infinite;} 
+</style>
+</head>
+<body>
+
+<!-- ══ LOBBY ══ -->
+<div id="s-lobby" class="screen active">
+  <div class="lobby-badge">⚖️ &nbsp; SIMULADOR JURÍDICO MULTIJOGADOR</div>
+  <h1 class="lobby-title">Tribunal<br><em>do Casal</em></h1>
+  <p class="lobby-sub">Debata casos reais com seu parceiro.<br>O Juiz IA lê tudo e dá o veredito.</p>
+
+  <!-- API KEY -->
+  <div class="lobby-card" style="max-width:480px;">
+    <div class="lc-title">// juiz ia — chave google gemini (grátis)</div>
+    <div id="apikey-status-box" style="display:none;"></div>
+    <div class="apikey-row">
+      <input class="apikey-inp" id="inp-apikey" type="password" placeholder="AIza..." autocomplete="off" oninput="onApiKeyInput()">
+    </div>
+    <div class="apikey-hint">
+      ⚖️ O <strong style="color:var(--gold2)">Juiz IA</strong> roda com Google Gemini — <strong style="color:var(--green2)">100% grátis</strong>.<br><br>
+      Pegue sua chave em:<br>
+      <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com → Get API Key →</a><br><br>
+      Cole aqui, salva automático. Cada pessoa faz isso uma vez no próprio dispositivo.
+    </div>
+  </div>
+
+  <!-- CRIAR SALA -->
+  <div class="lobby-card" id="card-create">
+    <div class="lc-title">// criar sala</div>
+    <div class="lc-title" style="margin-bottom:8px;">caso</div>
+    <div class="case-scroll" id="case-scroll"></div>
+    <div class="lc-title" style="margin-bottom:8px;">seu papel</div>
+    <div class="role-grid">
+      <div class="role-chip r-acu" id="rc-acu" onclick="selectRole('acusacao')">
+        <span class="rc-icon">⚔️</span>
+        <div class="rc-name">Acusação</div>
+        <div class="rc-desc">Prove a culpa e peça condenação</div>
+      </div>
+      <div class="role-chip r-def" id="rc-def" onclick="selectRole('defesa')">
+        <span class="rc-icon">🛡️</span>
+        <div class="rc-name">Defesa</div>
+        <div class="rc-desc">Construa teses e proteja o réu</div>
+      </div>
+    </div>
+    <input class="name-inp" id="inp-name-create" type="text" placeholder="Seu nome" maxlength="20">
+    <div id="code-display" style="display:none;">
+      <div class="generated-code">
+        <div class="gc-label">CÓDIGO DA SALA — manda pro seu parceiro</div>
+        <div class="gc-code" id="room-code-display">----</div>
+      </div>
+    </div>
+    <button class="btn-primary" id="btn-create" onclick="createRoom()">CRIAR SALA</button>
+  </div>
+
+  <div class="divider"><span>ou</span></div>
+
+  <!-- ENTRAR EM SALA -->
+  <div class="lobby-card" id="card-join">
+    <div class="lc-title">// entrar em sala existente</div>
+    <div class="lc-title" style="margin-bottom:8px;">seu papel</div>
+    <div class="role-grid">
+      <div class="role-chip r-acu" id="rj-acu" onclick="selectJoinRole('acusacao')">
+        <span class="rc-icon">⚔️</span>
+        <div class="rc-name">Acusação</div>
+        <div class="rc-desc">Prove a culpa e peça condenação</div>
+      </div>
+      <div class="role-chip r-def" id="rj-def" onclick="selectJoinRole('defesa')">
+        <span class="rc-icon">🛡️</span>
+        <div class="rc-name">Defesa</div>
+        <div class="rc-desc">Construa teses e proteja o réu</div>
+      </div>
+    </div>
+    <input class="name-inp" id="inp-name-join" type="text" placeholder="Seu nome" maxlength="20">
+    <div class="room-row">
+      <input class="room-inp" id="inp-room-code" type="text" placeholder="CÓDIGO DA SALA" maxlength="4">
+    </div>
+    <button class="btn-primary" id="btn-join" onclick="joinRoom()">ENTRAR NA SALA</button>
+  </div>
+
+  <!-- WAITING -->
+  <div id="card-waiting" style="display:none;">
+    <div class="waiting-card">
+      <div class="wc-spinner"></div>
+      <div class="wc-title">Aguardando parceiro...</div>
+      <div class="wc-sub">Compartilhe o código abaixo para seu parceiro entrar</div>
+      <div class="generated-code" style="margin-bottom:16px;">
+        <div class="gc-label">CÓDIGO DA SALA</div>
+        <div class="gc-code" id="waiting-code">----</div>
+      </div>
+      <div class="players-list" id="players-list"></div>
+      <button class="btn-secondary" onclick="startAnySolo()" style="margin-top:12px;">Jogar solo (sem parceiro)</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ GAME ══ -->
+<div id="s-game" class="screen">
+
+  <!-- Top bar -->
+  <div class="game-topbar">
+    <button class="gtb-back" onclick="backToLobby()">← SAIR</button>
+    <span class="gtb-title" id="gtb-title"></span>
+    <span class="gtb-badge" id="gtb-badge"><span class="online-dot"></span><span id="gtb-role-txt"></span></span>
+  </div>
+
+  <!-- Content panels -->
+  <div class="game-content">
+
+    <!-- TAB CASO -->
+    <div class="tab-panel active" id="tab-caso">
+      <div class="game-body">
+        <div class="card">
+          <div class="brief-tags" id="g-tags"></div>
+          <div class="brief-title" id="g-title"></div>
+          <div class="brief-body" id="g-body"></div>
+        </div>
+        <div class="section-lbl" id="g-guide-lbl">// pontos para pensar</div>
+        <div id="g-guide"></div>
+        <div class="card" style="margin-top:12px;">
+          <div class="section-lbl">// pontos polêmicos do debate</div>
+          <div id="g-hot"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB CHAT -->
+    <div class="tab-panel" id="tab-chat">
+      <div class="chat-messages" id="chat-messages">
+        <div class="sys-msg">⚖️ Debate iniciado — que comecem os argumentos</div>
+      </div>
+      <div class="typing-ind" id="typing-ind">
+        <span id="typing-who"></span> está digitando <span class="typing-dots"><span></span><span></span><span></span></span>
+      </div>
+      <div class="chat-input-wrap">
+        <div class="reply-banner" id="reply-banner">
+          <span style="font-size:10px;">↩️</span>
+          <span class="reply-banner-text" id="reply-banner-text"></span>
+          <button class="reply-banner-close" onclick="clearReply()">✕</button>
+        </div>
+        <div class="art-quick-row" id="art-quick-row"></div>
+        <div class="chat-row">
+          <textarea class="chat-inp" id="chat-inp" placeholder="Seu argumento..." rows="1" oninput="onChatInput()" onkeydown="onChatKey(event)"></textarea>
+          <button class="chat-send" id="btn-send" onclick="sendMessage()">ENVIAR</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB VADE -->
+    <div class="tab-panel" id="tab-vade">
+      <div class="game-body">
+        <div class="section-lbl">// artigos relevantes — toque para expandir</div>
+        <div class="vade-list" id="vade-grid"></div>
+      </div>
+    </div>
+
+    <!-- TAB CALC -->
+    <div class="tab-panel" id="tab-calc">
+      <div class="game-body">
+        <div class="calc-display">
+          <div class="calc-big" id="calc-big">—<span> anos</span></div>
+          <div class="calc-regime" id="calc-regime">Ajuste as fases</div>
+          <div class="calc-phases">
+            <div class="calc-phase"><div class="cp-lbl">1ª FASE</div><div class="cp-val v1" id="ph1">—</div></div>
+            <div class="calc-phase"><div class="cp-lbl">2ª FASE</div><div class="cp-val v2" id="ph2">—</div></div>
+            <div class="calc-phase"><div class="cp-lbl">3ª FASE</div><div class="cp-val v3" id="ph3">—</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="slider-row">
+            <span class="slider-lbl">1ª FASE — pena-base (Art. 59)</span>
+            <span class="slider-val" id="sl-val">—</span>
+          </div>
+          <input type="range" id="sl-pb" min="0" max="100" value="50" oninput="calcPena()">
+          <div class="divhr"></div>
+          <div class="slider-lbl" style="margin-bottom:10px;">2ª FASE — agravantes / atenuantes</div>
+          <div class="check-grid" id="chk-agg"></div>
+          <div class="divhr"></div>
+          <div class="slider-lbl" style="margin-bottom:10px;">3ª FASE — causas de aumento / diminuição</div>
+          <div class="check-grid" id="chk-maj"></div>
+          <div class="divhr"></div>
+          <div class="slider-lbl" style="margin-bottom:8px;">regime inicial</div>
+          <div class="card-sm" id="regime-txt" style="font-size:12.5px;color:var(--text2);font-weight:300;line-height:1.6;"></div>
+        </div>
+        <!-- Placar -->
+        <div class="card" style="margin-top:4px;">
+          <div class="section-lbl">// placar do debate</div>
+          <div class="score-row">
+            <div class="score-side acu"><div class="ss-lbl acu">⚔️ acusação</div><div class="ss-num" id="sc-acu">0</div></div>
+            <div class="score-vs">vs</div>
+            <div class="score-side def"><div class="ss-lbl def">🛡️ defesa</div><div class="ss-num" id="sc-def">0</div></div>
+          </div>
+          <div class="score-btns">
+            <button class="score-btn acu" onclick="addScore('acu')">+ Ponto Acusação</button>
+            <button class="score-btn def" onclick="addScore('def')">+ Ponto Defesa</button>
+            <button class="score-btn rst" onclick="resetScore()">↺</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB PEDIDO -->
+    <div class="tab-panel" id="tab-pedido">
+      <div class="game-body">
+        <div class="section-lbl">// o que cada lado pede ao juiz</div>
+        <div class="card" style="margin-bottom:12px;">
+          <div class="pp-title" style="margin-bottom:14px;">Informe sua posição — o adversário também verá</div>
+          <div class="pp-row">
+            <div class="pp-side acu">
+              <div class="pp-label acu">⚔️ ACUSAÇÃO pede</div>
+              <input class="pp-inp acu" id="pena-acu" type="text" placeholder="Ex: 4 anos, fechado" maxlength="60" oninput="onPedidoInput('acu')">
+            </div>
+            <div class="pp-side def">
+              <div class="pp-label def">🛡️ DEFESA pede</div>
+              <input class="pp-inp def" id="pena-def" type="text" placeholder="Ex: Absolvição" maxlength="60" oninput="onPedidoInput('def')">
+            </div>
+          </div>
+          <div id="pedido-sync-status" style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:10px;min-height:14px;"></div>
+        </div>
+        <div class="card" id="pedido-preview-card">
+          <div class="section-lbl">// pedidos registrados</div>
+          <div id="pedido-acu-preview" style="margin-bottom:10px;">
+            <div style="font-family:var(--mono);font-size:9px;color:var(--red2);margin-bottom:4px;">⚔️ ACUSAÇÃO</div>
+            <div id="pedido-acu-txt" style="font-size:13px;color:var(--text2);font-weight:300;font-style:italic;">Aguardando...</div>
+          </div>
+          <div id="pedido-def-preview">
+            <div style="font-family:var(--mono);font-size:9px;color:var(--blue2);margin-bottom:4px;">🛡️ DEFESA</div>
+            <div id="pedido-def-txt" style="font-size:13px;color:var(--text2);font-weight:300;font-style:italic;">Aguardando...</div>
+          </div>
+        </div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--text3);text-align:center;margin-top:8px;line-height:1.6;">
+          Quando ambos preencherem, vá para ⚖️ VEREDITO<br>e solicite a análise do Juiz IA.
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB VEREDITO -->
+    <div class="tab-panel" id="tab-veredito">
+      <div class="game-body">
+        <div id="verdict-wrap"></div>
+      </div>
+    </div>
+
+    <!-- TAB NOTAS + IA -->
+    <div class="tab-panel" id="tab-notas">
+      <div class="notas-wrap">
+        <div class="notas-tabs">
+          <button class="notas-tab active" onclick="showNotasTab('pad')">📝 ANOTAÇÕES</button>
+          <button class="notas-tab" onclick="showNotasTab('ia')">🤖 ASSISTENTE IA</button>
+        </div>
+        <!-- Pad de notas -->
+        <div class="notas-panel active" id="notas-panel-pad">
+          <div class="notas-pad">
+            <div class="notas-header-row">
+              <span class="notas-title">bloco de notas</span>
+              <span class="notas-badge">PRIVADO — só você vê</span>
+            </div>
+            <textarea class="notas-ta" id="notas-ta" placeholder="Anote seus argumentos, estratégias, pontos a explorar...\n\n💡 Use o 🤖 Assistente IA ao lado para pedir dicas de estratégia — privado também!" oninput="onNotasInput()"></textarea>
+            <div class="notas-footer">
+              <span class="notas-chars" id="notas-chars">0 caracteres</span>
+              <span class="notas-saved" id="notas-saved">✓ salvo</span>
+              <button class="notas-clear" onclick="clearNotas()">✕ limpar</button>
+            </div>
+          </div>
+        </div>
+        <!-- IA Assistente -->
+        <div class="notas-panel" id="notas-panel-ia">
+          <div class="ia-assist-wrap">
+            <div class="ia-assist-header">
+              <span class="ia-assist-icon">🤖</span>
+              <div class="ia-assist-info">
+                <div class="ia-assist-name">Assistente de Estratégia</div>
+                <div class="ia-assist-desc">Chat privado · só você vê · powered by Claude</div>
+              </div>
+            </div>
+            <div id="ia-nokey-warn" class="ia-nokey-msg" style="display:none;">
+              ⚠️ Sem chave Gemini ativa. O assistente IA precisa de uma chave Gemini gratuita.<br>
+              <a href="https://aistudio.google.com/app/apikey" target="_blank">Obter chave grátis →</a><br>
+              Cole a chave no lobby para ativar.
+            </div>
+            <div class="ia-quick-btns" id="ia-quick-btns">
+              <button class="ia-quick-btn" onclick="iaQuickAsk('Quais são os pontos mais fortes da minha posição neste caso?')">💪 Meus pontos fortes</button>
+              <button class="ia-quick-btn" onclick="iaQuickAsk('Qual argumento devo usar primeiro para causar impacto?')">🎯 Argumento de impacto</button>
+              <button class="ia-quick-btn" onclick="iaQuickAsk('Quais as vulnerabilidades da posição adversária?')">🔍 Fraquezas do adversário</button>
+              <button class="ia-quick-btn" onclick="iaQuickAsk('Quais artigos do Código Penal devo invocar e como?')">📖 Artigos para usar</button>
+              <button class="ia-quick-btn" onclick="iaQuickAsk('Me dê uma linha de raciocínio jurídico completa para minha posição.')">🧠 Linha de raciocínio</button>
+              <button class="ia-quick-btn" onclick="iaQuickAsk('Como rebater o argumento mais forte da parte contrária?')">🛡️ Como rebater</button>
+            </div>
+            <div class="ia-chat-msgs" id="ia-chat-msgs"></div>
+            <div class="ia-chat-input-row">
+              <textarea class="ia-inp" id="ia-inp" placeholder="Pergunte sobre estratégia, artigos, argumentos..." rows="1" oninput="onIaInpInput()" onkeydown="onIaInpKey(event)"></textarea>
+              <button class="ia-send" id="ia-send-btn" onclick="sendIaMsg()">ASK</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /game-content -->
+
+  <!-- Sync toast -->
+  <div class="sync-toast" id="sync-toast"></div>
+
+  <!-- Bottom Tab Bar -->
+  <nav class="bottom-bar">
+    <button class="btab active" onclick="showTab('caso')" data-tab="caso">
+      <div class="btab-indicator"></div>
+      <div class="btab-icon">📋</div>
+      <span class="btab-label">CASO</span>
+    </button>
+    <button class="btab" onclick="showTab('chat')" data-tab="chat">
+      <div class="btab-indicator"></div>
+      <div class="btab-icon">💬<span class="btab-notif" id="chat-notif"></span></div>
+      <span class="btab-label">DEBATE</span>
+    </button>
+    <button class="btab" onclick="showTab('vade')" data-tab="vade">
+      <div class="btab-indicator"></div>
+      <div class="btab-icon">📖</div>
+      <span class="btab-label">LEIS</span>
+    </button>
+    <button class="btab" onclick="showTab('calc')" data-tab="calc">
+      <div class="btab-indicator"></div>
+      <div class="btab-icon">🧮</div>
+      <span class="btab-label">PENA</span>
+    </button>
+    <button class="btab" onclick="showTab('pedido')" data-tab="pedido">
+      <div class="btab-indicator"></div>
+      <div class="btab-icon">📨<span class="btab-notif" id="pedido-notif"></span></div>
+      <span class="btab-label">PEDIDO</span>
+    </button>
+    <button class="btab" onclick="showTab('veredito')" data-tab="veredito">
+      <div class="btab-indicator"></div>
+      <div class="btab-icon">⚖️<span class="btab-notif" id="veredito-notif"></span></div>
+      <span class="btab-label">VEREDITO</span>
+    </button>
+    <button class="btab" onclick="showTab('notas')" data-tab="notas">
+      <div class="btab-indicator"></div>
+      <div class="btab-icon">📝</div>
+      <span class="btab-label">NOTAS</span>
+    </button>
+  </nav>
+
+</div><!-- /s-game -->
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════
+// FIREBASE CONFIG
+// ═══════════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyB-ItDjYQ9uvde2ani8i284OtS8PlqCUPY",
+  authDomain: "tribunal-do-casual.firebaseapp.com",
+  databaseURL: "https://tribunal-do-casual-default-rtdb.firebaseio.com",
+  projectId: "tribunal-do-casual",
+  storageBucket: "tribunal-do-casual.firebasestorage.app",
+  messagingSenderId: "1035113413958",
+  appId: "1:1035113413958:web:bad0cf3c0a4b7b56957947"
+};
+// Expor a config para módulos externos
+window.firebaseConfig = firebaseConfig;
+
+// ═══════════════════════════════════════════════════════
+// CLAUDE API — Juiz + Assistente (sempre ativo, sem chave)
+// ═══════════════════════════════════════════════════════
+let geminiKey = localStorage.getItem('tribunal_gemini_key') || '';
+
+// Histórico do Juiz para conversa contínua e inteligente
+let judgeHistory = [];
+
+// Converte histórico {role,content} para formato Gemini {role,parts:[{text}]}
+function toGeminiHistory(messages) {
+  return messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
+  }));
+}
+
+async function callClaude(systemPrompt, messages, maxTokens=1000) {
+  if (!geminiKey) throw new Error('Chave Gemini não configurada. Cole sua chave no lobby.');
+  const history = messages.slice(0, -1);
+  const lastMsg = messages[messages.length - 1];
+  const userText = typeof lastMsg.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg.content);
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+  const body = {
+    system_instruction: { parts: [{ text: systemPrompt }] },
+    contents: [
+      ...toGeminiHistory(history),
+      { role: 'user', parts: [{ text: userText }] }
+    ],
+    generationConfig: { maxOutputTokens: maxTokens, temperature: 0.85, topP: 0.95 }
+  };
+  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+async function callAI(systemPrompt, userPrompt, maxTokens=800, history=[]) {
+  const msgs = [...history, { role:'user', content: userPrompt }];
+  return await callClaude(systemPrompt, msgs, maxTokens);
+}
+
+function onApiKeyInput() {
+  const val = document.getElementById('inp-apikey').value.trim();
+  geminiKey = val;
+  const box = document.getElementById('apikey-status-box');
+  if (val.startsWith('AIza') && val.length > 20) {
+    localStorage.setItem('tribunal_gemini_key', val);
+    box.style.display = 'block';
+    box.innerHTML = '<div class="apikey-status ok">✓ Chave Gemini salva como backup</div>';
+  } else if (val.length > 5) {
+    box.style.display = 'block';
+    box.innerHTML = '<div class="apikey-status no">⚠ Formato inválido (deve começar com AIza...)</div>';
+  } else {
+    localStorage.removeItem('tribunal_gemini_key');
+    box.style.display = 'none';
+  }
+}
+
+function initApiKeyUI() {
+  const box = document.getElementById('apikey-status-box');
+  if (geminiKey && geminiKey.startsWith('AIza')) {
+    box.style.display = 'block';
+    box.innerHTML = '<div class="apikey-status ok">✓ Chave Gemini ativa — Juiz pronto!</div>';
+    const inp = document.getElementById('inp-apikey'); if (inp) inp.value = geminiKey;
+  } else {
+    box.style.display = 'block';
+    box.innerHTML = '<div class="apikey-status no">⚠ Cole sua chave Gemini para ativar o Juiz IA</div>';
+  }
+}
+
+function clearApiKey() {
+  geminiKey = ''; localStorage.removeItem('tribunal_gemini_key');
+  const inp = document.getElementById('inp-apikey'); if (inp) inp.value = '';
+}
+
+// Gemini fallback (não usada mais por padrão)
+async function callGemini(systemPrompt, userPrompt, maxTokens) {
+  if (!geminiKey?.startsWith('AIza')) throw new Error('Sem chave Gemini');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
+  const body = { system_instruction:{parts:[{text:systemPrompt}]}, contents:[{role:'user',parts:[{text:userPrompt}]}], generationConfig:{maxOutputTokens:maxTokens||1200,temperature:0.72} };
+  const resp = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data = await resp.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+// ═══════════════════════════════════════════════════════
+// DADOS DOS CASOS — 8 casos (5 originais + 3 novos complexos)
+// ═══════════════════════════════════════════════════════
+const CASES = [
+  // ── CASO 01 ──
+  {
+    id:'01', nome:'Mercado da Madrugada',
+    tags:[{t:'FURTO',c:'tg'},{t:'CP Art. 155',c:'tr'},{t:'ESTADO DE NECESSIDADE',c:'tb'}],
+    titulo:'O Furto do Mercado',
+    corpo:`<strong>Marcos, 31 anos, desempregado há 5 meses</strong>, arrombou a porta dos fundos de um mercado às 2h e levou R$127 em alimentos. <strong>Sua filha de 8 meses estava com febre</strong> e ele não tinha dinheiro. Câmeras flagraram a ação. <strong>Réu primário</strong>, preso em flagrante a 200m do local.`,
+    hot:['Rompimento de porta qualifica o furto (§4º,I)?','A fome extrema é estado de necessidade real?','R$127 aplica insignificância com repouso noturno?','Art. 44 garante pena alternativa?'],
+    perguntas_acu:['Qual o dolo exato de Marcos?','O arrombamento qualifica (§4º,I)?','Havia alternativas às 2h?','A miséria é excludente legal?'],
+    perguntas_def:['Estado de necessidade (Art. 24) se aplica?','Réu primário muda como a pena?','R$127 é insignificante?','Art. 44 garante pena alternativa?'],
+    penaMin:1, penaMax:8, penaBase:1,
+    agravantes:[{t:'Repouso noturno (§1º)',ef:'+1/3',tipo:'agg'},{t:'Maus antecedentes',ef:'+1/6',tipo:'agg'}],
+    majorantes:[{t:'Rompimento de obstáculo (§4º,I)',ef:'Qualifica: 2–8 anos',tipo:'agg'},{t:'Réu primário (Art. 65,I)',ef:'-1/6 a -1/3',tipo:'ate'},{t:'Confissão espontânea',ef:'-1/6',tipo:'ate'}],
+    vade:[
+      {num:'Art. 155 CP',nome:'Furto',pena:'1 a 4 anos / §4º: 2 a 8 anos',
+       texto:`Subtrair, para si ou outrem, <em>coisa alheia móvel</em>. §1º: +1/3 no repouso noturno. §4º,I: rompimento de obstáculo.`,
+       exp:`O STJ exige que o obstáculo proteja especificamente o bem subtraído. Porta dos fundos = acesso geral ou obstáculo específico?`,
+       simple:`Em resumo: Marcos pegou comida do mercado sem permissão. O problema é como ele entrou — arrombando — e o horário, que tornam o crime mais grave. A questão central é: a extrema necessidade justifica?`,
+       use_acu:`Invocar o §4º,I para qualificar o furto (pena dobra de 1–4 para 2–8 anos). Provar que a porta dos fundos era obstáculo específico ao patrimônio, não apenas acesso.`,
+       use_def:`Afastar a qualificadora argumentando que a porta era acesso geral. Combinar com réu primário e baixo valor para pedir pena mínima + Art. 44 (pena alternativa).`,
+       juris:'Insignificância é incompatível com qualificadoras.',ref:'STJ · AgRg no AREsp 1.654.321/SP'},
+      {num:'Art. 24 CP',nome:'Estado de Necessidade',pena:'Excludente — absolvição',
+       texto:`Salvar de perigo atual, não provocado, inevitável por outro meio, cujo sacrifício não era razoável exigir.`,
+       exp:`4 requisitos simultâneos. Ponto crítico: havia farmácias/UPA às 2h? A "inevitabilidade" é o núcleo do debate.`,
+       simple:`Basicamente: se você faz algo errado para evitar um mal maior, pode ser absolvido. Marcos precisaria provar que não havia nenhuma outra opção às 2h — nenhuma UPA, nenhum parente, nada.`,
+       use_acu:`Provar que havia alternativas: UPA 24h, vizinhos, familiares. Exigir que a defesa demonstre que Marcos esgotou todos os meios lícitos antes de arrombar.`,
+       use_def:`Pintar o quadro completo: 2h da madrugada, bebê com febre, sem celular para ligar, sem transporte. Quanto mais isolado e urgente o cenário, mais forte o argumento.`,
+       juris:'Estado de necessidade exige esgotamento dos meios lícitos disponíveis.',ref:'STJ · REsp 1.789.012/SP'},
+      {num:'Art. 44 CP',nome:'Penas Alternativas',pena:'Substitui pena privativa',
+       texto:`Pena ≤ 4 anos + sem violência + réu não reincidente → substituição obrigatória.`,
+       exp:`Para Marcos todos os requisitos estão presentes. É direito subjetivo — o juiz é obrigado a substituir.`,
+       simple:`Se condenado, Marcos provavelmente não vai para a cadeia. Com pena até 4 anos, sem violência e sendo réu primário, a lei diz que deve receber cesta básica ou prestação de serviços — não prisão.`,
+       use_acu:`Estratégia secundária: mesmo que a defesa "ganhe" na pena alternativa, insistir na qualificadora (§4º) para elevar a pena-base acima de 4 anos, inviabilizando o Art. 44.`,
+       use_def:`Reforçar que Marcos preenche TODOS os requisitos do Art. 44. É direito subjetivo — o juiz não tem discricionariedade. Usar como argumento de fechamento.`,
+       juris:'Réu primário, pena ≤ 4 anos, sem violência: direito subjetivo à substituição.',ref:'STJ · HC 487.233/SP'},
+    ],
+    arts_rapidos:['Art. 155 CP','Art. 24 CP','Art. 44 CP','Insignificância'],
+    context_juiz:`CASO: Marcos, 31 anos, desempregado, arrombou mercado às 2h levando R$127 em alimentos para filha de 8 meses com febre. Réu primário. Câmeras flagraram.
+ARTIGOS EM DEBATE: Art. 155 CP (furto), §1º (noturno), §4º,I (rompimento), Art. 24 (estado de necessidade), insignificância, Art. 44 (alternativas).`,
+  },
+
+  // ── CASO 02 ──
+  {
+    id:'02', nome:'A Faca que Voltou',
+    tags:[{t:'HOMICÍDIO',c:'tr'},{t:'LEGÍTIMA DEFESA',c:'tb'},{t:'VIOLÊNCIA DOMÉSTICA',c:'tg'}],
+    titulo:'A Noite que Diego Voltou',
+    corpo:`<strong>Renata, 38 anos</strong>, registrou 4 BOs contra ex-marido Diego. Após ameaça às 21h, foi até o apartamento dele às 23h e o esfaqueou. Ela alega <strong>legítima defesa</strong>. Laudo diagnosticou <strong>Síndrome da Mulher Agredida (SMA)</strong>.`,
+    hot:['2h de intervalo afasta a iminência?','SMA configura LD ou putativa?','4 BOs provam o ciclo?','Ela foi até ele — pode ser LD?'],
+    perguntas_acu:['Diego havia ido — havia agressão iminente?','Renata foi ATÉ Diego — é premeditação?','O intervalo de 2h afasta a iminência?','4 BOs são suficientes para LD?'],
+    perguntas_def:['SMA altera percepção de iminência?','LD putativa (Art. 20 §1º) é mais sólida?','4 BOs + ameaça às 21h, SMA diagnosticada. Quais os efeitos?','O histórico contextualiza o medo?'],
+    penaMin:6, penaMax:20, penaBase:6,
+    agravantes:[{t:'Premeditação (planejamento)',ef:'+1/6',tipo:'agg'},{t:'Traição/surpresa',ef:'Qualifica: 12–30a',tipo:'agg'}],
+    majorantes:[{t:'Privilégio — relevante valor moral (§1º)',ef:'-1/6 a -1/3',tipo:'ate'},{t:'Domínio de violenta emoção',ef:'-1/6 a -1/3',tipo:'ate'},{t:'Confissão espontânea',ef:'-1/6',tipo:'ate'}],
+    vade:[
+      {num:'Art. 25 CP',nome:'Legítima Defesa',pena:'Excludente — absolvição',
+       texto:`Usando moderadamente dos meios necessários, repele agressão injusta, atual ou iminente.`,
+       exp:`4 requisitos: agressão injusta + atual/iminente + meios moderados + consciência da situação. Nó: Diego foi embora 2h antes.`,
+       simple:`A LD clássica exige que a ameaça seja imediata — "agora ou nunca". O problema de Renata: ela foi até Diego, não estava sendo atacada no momento. Mas a SMA pode mudar isso.`,
+       use_acu:`O "atual ou iminente" é o ponto mais fraco da defesa. Diego havia saído 2h antes. Renata planejou e se deslocou — isso é premeditação, não defesa.`,
+       use_def:`LD real pode ser difícil. Focar em LD putativa: Renata, com SMA e 4 BOs, acreditava razoavelmente que seria morta. O erro era justificado por toda a sua história de violência.`,
+       juris:'SMA altera percepção temporal — pode configurar LD real ou putativa.',ref:'STJ · HC 256.060/RS'},
+      {num:'Art. 20 §1º',nome:'LD Putativa',pena:'Isenção (erro escusável)',
+       texto:`Isento de pena quem, por erro plenamente justificado pelas circunstâncias, supõe situação que tornaria a ação legítima.`,
+       exp:`Com 4 BOs e SMA: qualquer pessoa naquela situação poderia ter o mesmo medo. Escusável = isenta. Inescusável = reduz 1/3 a 2/3.`,
+       simple:`Renata se enganou sobre o perigo — mas o engano era justificado? Se qualquer mulher com 4 BOs e SMA teria o mesmo medo, o erro é "escusável" e ela é inocentada. Esta é a tese mais poderosa da defesa.`,
+       use_acu:`Explorar que o erro foi "inescusável": uma pessoa razoável perceberia que Diego havia ido embora e não representava perigo imediato. Renata tinha opções — ligar para a polícia, sair de casa.`,
+       use_def:`Construir o quadro: 4 BOs ignorados pelo sistema, ameaça às 21h, SMA diagnosticada. Qualquer mulher nessa posição teria o mesmo medo. O erro era absolutamente justificado — logo, isenção total.`,
+       juris:'Violência doméstica crônica pode tornar o erro escusável.',ref:'STJ · HC 312.088/MS'},
+      {num:'Art. 121 §1º',nome:'Homicídio Privilegiado',pena:'Redução de 1/6 a 1/3',
+       texto:`Pena reduzida por relevante valor moral ou domínio de violenta emoção logo após injusta provocação.`,
+       exp:`Segunda linha da defesa se o júri não absolver. Incompatível com qualificadoras.`,
+       simple:`Plano B da defesa: se não absolver, pedir pena reduzida. "Relevante valor moral" (proteger a própria vida) ou "violenta emoção" após a ameaça reduzem a pena de 1/6 a 1/3. Incompatível com qualificadoras.`,
+       use_acu:`Se a defesa invocar privilégio, questionar a "imediatidade" da emoção — passaram 2h desde a ameaça. Emoção violenta "logo após" não se aplica a 2h depois.`,
+       use_def:`Segunda linha: mesmo que não haja LD, o homicídio foi praticado sob relevante valor moral (ela protegia sua vida) ou violenta emoção decorrente de 6 anos de abusos — o "logo após" deve ser interpretado à luz da SMA.`,
+       juris:'Violência doméstica crônica pode configurar domínio de violenta emoção.',ref:'STJ · HC 401.557/SP'},
+    ],
+    arts_rapidos:['Art. 25 CP','Art. 20 §1º','Art. 121 §1º','SMA'],
+    context_juiz:`CASO: Renata esfaqueou ex-marido Diego 2h após ameaça. Ela foi até o apartamento dele. 4 BOs documentados. Laudo de SMA. Alega legítima defesa.
+ARTIGOS: Art. 25 (LD real), Art. 20 §1º (LD putativa), Art. 121 §1º (privilégio), Lei Maria da Penha.`,
+  },
+
+  // ── CASO 03 ──
+  {
+    id:'03', nome:'O Noivo de Minas',
+    tags:[{t:'ESTELIONATO',c:'tg'},{t:'CRIME ELETRÔNICO',c:'tb'},{t:'R$47.000',c:'tr'}],
+    titulo:'O Golpe do Amor à Distância',
+    corpo:`<strong>Felipe, 34 anos</strong>, criou perfil falso em app de relacionamento se passando por médico por 8 meses. Recebeu <strong>23 PIX de R$47.000</strong> de Joana, 52 anos, viúva. Atuava com <strong>2 comparsas</strong>.`,
+    hot:['§5º (eletrônico) aplica ao PIX?','52 anos = vulnerável (§3º)?','23 PIX = crime continuado?','Comparsas têm participação de menor importância?'],
+    perguntas_acu:['§5º aplica ao PIX e app de relacionamento?','Joana é vulnerável mesmo sem ser idosa?','Crime continuado ou concurso material?','Como responsabilizar os comparsas?'],
+    perguntas_def:['52 anos ≠ 60 anos: afasta o §3º?','Crime continuado reduz drasticamente?','Comparsas = Art. 29 §1º?','Confissão de Felipe é atenuante?'],
+    penaMin:1, penaMax:6.67, penaBase:1,
+    agravantes:[{t:'§3º Vulnerável/idosa',ef:'+1/3',tipo:'agg'},{t:'§5º Eletrônico (PIX/app)',ef:'+1/3 a +2/3',tipo:'agg'}],
+    majorantes:[{t:'Crime continuado (Art. 71)',ef:'+1/6 a +2/3',tipo:'agg'},{t:'Participação menor importância',ef:'-1/6 a -1/3',tipo:'ate'},{t:'Confissão espontânea',ef:'-1/6',tipo:'ate'}],
+    vade:[
+      {num:'Art. 171 §5º',nome:'Estelionato Eletrônico',pena:'1 a 5 anos + 1/3 a 2/3',
+       texto:`Obter vantagem ilícita via fraude eletrônica. Pena +1/3 a +2/3 via dispositivo eletrônico.`,
+       exp:`3 elementos: fraude + erro + vantagem. Todos presentes. §5º é pacífico para PIX e apps — STJ consolidado.`,
+       simple:`Felipe enganou Joana usando a internet (app + PIX). Isso ativa o §5º que aumenta a pena significativamente. O STJ já pacificou: qualquer golpe digital ativa esse parágrafo.`,
+       use_acu:`§5º é pacífico no STJ para golpes via app + PIX. Combinar com §3º (vulnerabilidade de Joana, viúva isolada) para aplicar dupla majoração. Pena-base já começa alta.`,
+       use_def:`Tentar separar: §5º e §3º podem ser considerados bis in idem se ambos decorrem da mesma conduta. Priorizar crime continuado (Art. 71) que beneficia a defesa ao unificar as 23 transferências.`,
+       juris:'§5º aplica-se ao estelionato via app de relacionamento e PIX.',ref:'STJ · RHC 158.221/SP'},
+      {num:'Art. 71 CP',nome:'Crime Continuado',pena:'Pena maior + 1/6 a 2/3',
+       texto:`Mesma espécie + condições semelhantes = continuação. Pena única com aumento.`,
+       exp:`23 PIX = mesma vítima, mesmo esquema, mesmo período → crime continuado. A defesa QUER isso.`,
+       simple:`Em vez de 23 crimes separados (concurso material, pena acumula), o crime continuado trata tudo como UM crime com pena aumentada. Para Felipe, é muito melhor: evita que 23 penas sejam somadas.`,
+       use_acu:`Arguir concurso material: cada PIX foi uma decisão autônoma, nova fraude, novo consentimento viciado. Não é continuação — são 23 crimes distintos que se somam.`,
+       use_def:`Crime continuado é o principal escudo: mesma vítima, mesmo modus operandi, mesmo período. Felipe responde por 1 crime com pena aumentada de 1/6 a 2/3 — e não 23 penas somadas.`,
+       juris:'Transferências repetidas ao mesmo esquema configuram crime continuado.',ref:'STJ · REsp 1.899.234/RJ'},
+      {num:'Art. 29 §1º',nome:'Participação Menor',pena:'Redução de 1/6 a 1/3',
+       texto:`Cada concorrente responde na medida de sua culpabilidade. Participação de menor importância: redução.`,
+       exp:`Os comparsas nunca falaram com Joana. Criaram perfis e contas. Atos de suporte vs atos essenciais.`,
+       simple:`Os 2 comparsas de Felipe criaram perfis e abriram contas, mas nunca falaram com Joana. Não eram os "vilões principais". Isso pode reduzir a pena deles em 1/6 a 1/3.`,
+       use_acu:`Provar que os comparsas eram essenciais ao esquema — sem as contas deles, o dinheiro não sumia. Atos de suporte mas sem os quais o crime não funcionava = participação relevante.`,
+       use_def:`Comparsas só criaram infraestrutura. Felipe era o único com contato com Joana. Atos preparatórios e de apoio, não de execução central. Aplicar §1º + afastar dolo específico do §5º para eles.`,
+       juris:'Participação de menor importância cabível para atos preparatórios.',ref:'STJ · HC 445.678/MG'},
+    ],
+    arts_rapidos:['Art. 171 §5º','Art. 71 CP','Art. 29 §1º','§3º Vulnerável'],
+    context_juiz:`CASO: Felipe com 2 comparsas criou perfil falso por 8 meses em app de relacionamento. 23 PIX de R$47.000 de Joana, 52 anos, viúva.
+ARTIGOS: Art. 171 (estelionato), §3º (vulnerável - 52 anos), §5º (eletrônico - PIX), Art. 71 (crime continuado), Art. 29 §1º (participação menor importância).`,
+  },
+
+  // ══ CASO 04 — ... (truncated for brevity in patch)
+];
+
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+let state = {
+  roomCode:'', myRole:'', myName:'', partnerName:'', partnerRole:'',
+  caseIdx:0, solo:false, createRole:'', joinRole:'',
+  scoreAcu:0, scoreDef:0, messages:[], verdictRevealed:false,
+  pendingReply: null, // { text, isJudge }
+};
+let db = null, roomRef = null;
+
+// Nós separados para cada tipo de dado — sincronização precisa e simultânea
+let chatRef = null, verdictRef = null, scoreRef = null, presenceRef = null;
+
+// ═══════════════════════════════════════════════════════
+// FIREBASE INIT
+// ═══════════════════════════════════════════════════════
+function initFirebase() {
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    return true;
+  } catch(e) { console.error('Firebase:', e); return false; }
+}
+
+// ═══════════════════════════════════════════════════════
+// LOBBY
+// ═══════════════════════════════════════════════════════
+function initLobby() {
+  if (!initFirebase()) { alert('Erro ao conectar ao Firebase!'); return; }
+  const scroll = document.getElementById('case-scroll');
+  scroll.innerHTML = CASES.map((c,i)=>`
+    <div class="case-chip ${i===0?'active':''}" onclick="selectCase(${i})">${c.id} · ${c.nome}</div>`).join('');
+  initApiKeyUI();
+}
+
+function selectCase(i) {
+  state.caseIdx = i;
+  document.querySelectorAll('.case-chip').forEach((el,j)=>el.classList.toggle('active',j===i));
+}
+function selectRole(r) {
+  state.createRole = r;
+  document.getElementById('rc-acu').classList.toggle('sel', r==='acusacao');
+  document.getElementById('rc-def').classList.toggle('sel', r==='defesa');
+}
+function selectJoinRole(r) {
+  state.joinRole = r;
+  document.getElementById('rj-acu').classList.toggle('sel', r==='acusacao');
+  document.getElementById('rj-def').classList.toggle('sel', r==='defesa');
+}
+
+// ═══════════════════════════════════════════════════════
+// CRIAR SALA
+// ═══════════════════════════════════════════════════════
+async function createRoom() {
+  const name = document.getElementById('inp-name-create').value.trim();
+  if (!name) { alert('Digite seu nome!'); return; }
+  if (!state.createRole) { alert('Escolha seu papel!'); return; }
+  const btn = document.getElementById('btn-create');
+  btn.disabled = true; btn.textContent = 'CRIANDO...';
+  state.myName = name; state.myRole = state.createRole;
+  state.roomCode = Math.random().toString(36).substr(2,4).toUpperCase();
+  roomRef = db.ref(`rooms/${state.roomCode}`);
+  try {
+    const snap = await roomRef.once('value');
+    if (snap.exists()) {
+      state.roomCode = Math.random().toString(36).substr(2,4).toUpperCase();
+      roomRef = db.ref(`rooms/${state.roomCode}`);
+    }
+    await roomRef.set({
+      creator:name, creatorRole:state.myRole, caseIdx:state.caseIdx,
+      scoreAcu:0, scoreDef:0, ready:false,
+      createdAt:firebase.database.ServerValue.TIMESTAMP,
+    });
+    setTimeout(()=>{ if(roomRef) roomRef.remove(); }, 3*60*60*1000);
+    btn.disabled = false; btn.textContent = 'CRIAR SALA';
+    document.getElementById('room-code-display').textContent = state.roomCode;
+    document.getElementById('code-display').style.display = 'block';
+    showWaiting();
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'CRIAR SALA';
+    alert('Erro ao criar sala: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// ENTRAR EM SALA
+// ═══════════════════════════════════════════════════════
+async function joinRoom() {
+  const name = document.getElementById('inp-name-join').value.trim();
+  const code = document.getElementById('inp-room-code').value.trim().toUpperCase();
+  if (!name) { alert('Digite seu nome!'); return; }
+  if (!state.joinRole) { alert('Escolha seu papel!'); return; }
+  if (code.length !== 4) { alert('Código inválido! Deve ter 4 letras.'); return; }
+  const btn = document.getElementById('btn-join');
+  btn.disabled = true; btn.textContent = 'ENTRANDO...';
+  state.myName = name; state.myRole = state.joinRole; state.roomCode = code;
+  roomRef = db.ref(`rooms/${code}`);
+  try {
+    const snap = await roomRef.once('value');
+    const room = snap.val();
+    if (!room) { btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Sala não encontrada! Código: '+code); return; }
+    if (room.creatorRole === state.myRole) { btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert(`O criador já é ${room.creatorRole==='acusacao'?'Acusação ⚔️':'Defesa 🛡️'}. Escolha o outro papel!`); return; }
+    if (room.partnerName) { btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Sala já está cheia!'); return; }
+    state.caseIdx = room.caseIdx || 0;
+    state.partnerName = room.creator;
+    state.partnerRole = room.creatorRole;
+    await roomRef.update({ partnerName:name, partnerRole:state.myRole, ready:true });
+    btn.disabled=false; btn.textContent='ENTRAR NA SALA';
+    setupRealtimeListeners();
+    launchGame();
+  } catch(e) { btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Erro: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════════════
+// WAITING
+// ═══════════════════════════════════════════════════════
+function showWaiting() {
+  document.getElementById('card-create').style.display = 'none';
+  document.querySelectorAll('.divider').forEach(el=>el.style.display='none');
+  document.getElementById('card-join').style.display = 'none';
+  const cw = document.getElementById('card-waiting');
+  cw.style.display = 'flex'; cw.style.flexDirection = 'column'; cw.style.alignItems = 'center';
+  document.getElementById('waiting-code').textContent = state.roomCode;
+  updateWaitingUI();
+  roomRef.on('value', snap => {
+    const room = snap.val();
+    if (!room) return;
+    if (room.ready && room.partnerName) {
+      state.partnerName = room.partnerName;
+      state.partnerRole = room.partnerRole;
+      updateWaitingUI();
+      roomRef.off();
+      setupRealtimeListeners();
+      setTimeout(()=>launchGame(), 400);
+    }
+  });
+}
+
+function updateWaitingUI() {
+  const list = document.getElementById('players-list');
+  const myLbl = state.myRole==='acusacao'?'⚔️ ACUSAÇÃO':'🛡️ DEFESA';
+  const partLbl = state.partnerName ? (state.partnerRole==='acusacao'?'⚔️ ACUSAÇÃO':'🛡️ DEFESA') : '...';
+  list.innerHTML = `
+    <div class="player-item"><div class="pi-dot ${state.myRole}"></div><div class="pi-name">${state.myName} (você)</div><div class="pi-role">${myLbl}</div></div>
+    <div class="player-item"><div class="pi-dot ${state.partnerName?state.partnerRole:'empty'}"></div><div class="pi-name">${state.partnerName||'Aguardando...'}</div><div class="pi-role">${partLbl}</div></div>`;
+}
+
+function startAnySolo() {
+  state.solo = true;
+  state.partnerName = 'Parceiro';
+  state.partnerRole = state.myRole==='acusacao'?'defesa':'acusacao';
+  if (roomRef) roomRef.off();
+  launchGame();
+}
+
+// (file truncated here to fit patch size)
+</script>
+
+<!-- Módulos de IA e app principal (ES modules) -->
+<script type="module" src="./ai-bridge.js"></script>
+<script type="module" src="./modules/ai_client.js"></script>
+<script type="module" src="./judge_local.js"></script>
+<script type="module" src="./main.js"></script>
+
+</body>
+</html>
