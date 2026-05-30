@@ -40,14 +40,18 @@ function initUI(){
 
 function selectCase(i){ if(window.CASES){ state.caseIdx = i; document.querySelectorAll('.case-chip').forEach((el,j)=>el.classList.toggle('active',j===i)); }}
 
+function initLobby(){ if(!initFirebase()){ alert('Erro ao conectar ao Firebase!'); return; } initUI(); initApiKeyUI?.(); }
+
 // state mirrored from inline script
 const state = window.state || { roomCode:'', myRole:'', myName:'', partnerName:'', partnerRole:'', caseIdx:0, solo:false };
 window.state = state;
 
+function showToast(msg, duration=3000){ const t = document.createElement('div'); t.textContent = msg; t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1c1c27;border:1px solid #c9953a;color:#e8b45a;padding:12px 20px;border-radius:8px;font-family:var(--mono);font-size:12px;z-index:9999;animation:slideUp .3s ease;'; document.body.appendChild(t); setTimeout(()=>{ t.style.animation='slideDown .3s ease'; setTimeout(()=>t.remove(), 300); }, duration); }
+
 async function createRoom(){
-  if(!initFirebase()) { alert('Erro ao inicializar Firebase'); return; }
-  const name = $('inp-name-create').value.trim(); if(!name){ alert('Digite seu nome'); return; }
-  if(!state.createRole){ alert('Escolha seu papel'); return; }
+  if(!initFirebase()) { showToast('Erro ao inicializar Firebase'); return; }
+  const name = $('inp-name-create').value.trim(); if(!name){ showToast('Digite seu nome'); return; }
+  if(!state.createRole){ showToast('Escolha seu papel'); return; }
   const btn = $('btn-create'); btn.disabled=true; btn.textContent='CRIANDO...';
   state.myName = name; state.myRole = state.createRole; state.roomCode = Math.random().toString(36).substr(2,4).toUpperCase();
   roomRef = db.ref(`rooms/${state.roomCode}`);
@@ -58,29 +62,31 @@ async function createRoom(){
     roomRef.onDisconnect().remove();
     btn.disabled=false; btn.textContent='CRIAR SALA';
     $('room-code-display').textContent = state.roomCode; $('code-display').style.display='block';
+    showToast('✓ Sala criada! Aguardando parceiro...');
     showWaiting();
-  }catch(e){ btn.disabled=false; btn.textContent='CRIAR SALA'; alert('Erro: '+e.message); }
+  }catch(e){ btn.disabled=false; btn.textContent='CRIAR SALA'; showToast('Erro: '+e.message); }
 }
 
 async function joinRoom(){
-  if(!initFirebase()) { alert('Erro ao inicializar Firebase'); return; }
+  if(!initFirebase()) { showToast('Erro ao inicializar Firebase'); return; }
   const name = $('inp-name-join').value.trim(); const code = $('inp-room-code').value.trim().toUpperCase();
-  if(!name){ alert('Digite seu nome'); return; }
-  if(!state.joinRole){ alert('Escolha seu papel'); return; }
-  if(code.length!==4){ alert('Código inválido'); return; }
+  if(!name){ showToast('Digite seu nome'); return; }
+  if(!state.joinRole){ showToast('Escolha seu papel'); return; }
+  if(code.length!==4){ showToast('Código deve ter 4 letras'); return; }
   const btn = $('btn-join'); btn.disabled=true; btn.textContent='ENTRANDO...';
   state.myName = name; state.myRole = state.joinRole; state.roomCode = code; roomRef = db.ref(`rooms/${code}`);
   try{
     const snap = await roomRef.once('value'); const room = snap.val();
-    if(!room){ btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Sala não encontrada'); return; }
-    if(room.creatorRole === state.myRole){ btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Papel já ocupado'); return; }
-    if(room.partnerName){ btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Sala cheia'); return; }
+    if(!room){ btn.disabled=false; btn.textContent='ENTRAR NA SALA'; showToast('Sala não encontrada'); return; }
+    if(room.creatorRole === state.myRole){ btn.disabled=false; btn.textContent='ENTRAR NA SALA'; showToast('Papel já ocupado'); return; }
+    if(room.partnerName){ btn.disabled=false; btn.textContent='ENTRAR NA SALA'; showToast('Sala cheia'); return; }
     state.caseIdx = room.caseIdx || 0; state.partnerName = room.creator; state.partnerRole = room.creatorRole;
     await roomRef.update({ partnerName:name, partnerRole:state.myRole, ready:true });
     setupRealtimeListeners();
-    launchGame();
+    showToast('✓ Entrando na sala...');
+    setTimeout(launchGame, 300);
     btn.disabled=false; btn.textContent='ENTRAR NA SALA';
-  }catch(e){ btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Erro: '+e.message); }
+  }catch(e){ btn.disabled=false; btn.textContent='ENTRAR NA SALA'; showToast('Erro: '+e.message); }
 }
 
 function showWaiting(){
@@ -180,11 +186,17 @@ function launchGame(){
   $('gtb-role-txt').textContent = state.myRole==='acusacao'?'ACUSAÇÃO':'DEFESA';
 }
 
+function selectCase(i){ if(window.CASES){ state.caseIdx = i; document.querySelectorAll('.case-chip').forEach((el,j)=>el.classList.toggle('active',j===i)); }}
+
+function selectRole(r){ state.createRole = r; document.getElementById('rc-acu')?.classList.toggle('sel', r==='acusacao'); document.getElementById('rc-def')?.classList.toggle('sel', r==='defesa'); }
+
+function selectJoinRole(r){ state.joinRole = r; document.getElementById('rj-acu')?.classList.toggle('sel', r==='acusacao'); document.getElementById('rj-def')?.classList.toggle('sel', r==='defesa'); }
+
 // expose helpers to global scope for inline handlers
-window.createRoom = createRoom; window.joinRoom = joinRoom; window.startAnySolo = startAnySolo; window.sendMessage = sendMessage; window.addScore = addScore; window.resetScore = resetScore; window.requestJudge = requestJudge; window.launchGame = launchGame;
+window.createRoom = createRoom; window.joinRoom = joinRoom; window.startAnySolo = startAnySolo; window.sendMessage = sendMessage; window.addScore = addScore; window.resetScore = resetScore; window.requestJudge = requestJudge; window.launchGame = launchGame; window.selectCase = selectCase; window.selectRole = selectRole; window.selectJoinRole = selectJoinRole; window.initLobby = initLobby;
 
 // init on DOM ready
-window.addEventListener('DOMContentLoaded', ()=>{ initUI(); initFirebase(); initApiKeyUI?.(); });
+window.addEventListener('DOMContentLoaded', ()=>{ initUI(); initFirebase(); });
 
 // Additional global handlers expected by inline HTML
 function backToLobby(){

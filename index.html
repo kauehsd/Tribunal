@@ -527,6 +527,59 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;bac
 .msg .mine .msg-reply-player-btn{display:none;} 
 /* Pedido tab styles */
 .pedido-sync-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green2);margin-right:5px;animation:pulse 2s infinite;} 
+
+/* ══ MOBILE & RESPONSIVE ══ */
+@media(max-width:768px){
+  #s-lobby{padding:30px 16px calc(30px + var(--safe-b));}
+  .lobby-title{font-size:clamp(36px,9vw,64px);}
+  .lobby-card{max-width:100%;padding:20px;}
+  .role-grid{grid-template-columns:1fr;}
+  .game-topbar{padding:8px 10px;padding-top:calc(8px + var(--safe-t));}
+  .gtb-title{font-size:clamp(12px,4vw,14px);}
+  .game-content{height:calc(100vh - 140px);}
+  .game-nav{padding:8px 4px;}
+  .btab{padding:10px 8px;font-size:10px;}
+  .btab-label{display:none;}
+  .chat-messages{height:calc(100vh - 220px);}
+  .tab-panel{overflow-y:auto;-webkit-overflow-scrolling:touch;}
+}
+
+@media(max-width:480px){
+  body{padding:12px;}
+  .lobby-badge{font-size:9px;}
+  .lobby-title{font-size:clamp(28px,8vw,48px);margin-bottom:4px;}
+  .lobby-sub{font-size:12px;margin-bottom:32px;}
+  .lobby-card{padding:16px;margin-bottom:16px;}
+  .btn-primary{padding:12px;font-size:11px;min-height:44px;}
+  .role-chip{padding:12px 8px;}
+  .role-chip .rc-icon{font-size:18px;}
+  .role-chip .rc-name{font-size:14px;}
+  .case-chip{font-size:9px;padding:6px 10px;}
+  .chat-row{flex-wrap:wrap;}
+  .game-nav{height:auto;max-height:80px;overflow-y:auto;}
+  .btab{min-width:40px;}
+  .score-btns{gap:4px;}
+}
+
+/* Screen transitions */
+@keyframes slideIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+@keyframes slideOut{from{opacity:1;transform:translateY(0);}to{opacity:0;transform:translateY(8px);}}
+@keyframes slideUp{from{opacity:0;transform:translateX(-50%) translateY(20px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+@keyframes slideDown{from{opacity:1;transform:translateX(-50%) translateY(0);}to{opacity:0;transform:translateX(-50%) translateY(20px);}}
+.screen.active{animation:slideIn .3s ease;}
+
+/* Button feedback */
+button:active{transform:scale(.98);}
+button:disabled{cursor:not-allowed;opacity:.5;}
+input:disabled{cursor:not-allowed;opacity:.5;}
+
+/* Touch improvements */
+@media(hover:none){
+  button{padding:12px 16px;min-height:48px;}
+  .case-chip{padding:10px 16px;}
+  .role-chip{padding:18px 14px;}
+  button:active{transform:scale(.97);}
+}
 </style>
 </head>
 <body>
@@ -1102,159 +1155,14 @@ ARTIGOS: Art. 171 (estelionato), §3º (vulnerável - 52 anos), §5º (eletrôni
 
 // ═══════════════════════════════════════════════════════
 // STATE
-// ═══════════════════════════════════════════════════════
-let state = {
-  roomCode:'', myRole:'', myName:'', partnerName:'', partnerRole:'',
-  caseIdx:0, solo:false, createRole:'', joinRole:'',
-  scoreAcu:0, scoreDef:0, messages:[], verdictRevealed:false,
-  pendingReply: null, // { text, isJudge }
-};
-let db = null, roomRef = null;
+// State, Firebase refs e funções de inicialização são gerenciados por main.js
+// Este arquivo contém apenas as variáveis necessárias para o escopo global
+// e as funções de UI específicas (API key, etc.)
 
-// Nós separados para cada tipo de dado — sincronização precisa e simultânea
-let chatRef = null, verdictRef = null, scoreRef = null, presenceRef = null;
-
-// ═══════════════════════════════════════════════════════
-// FIREBASE INIT
-// ═══════════════════════════════════════════════════════
-function initFirebase() {
-  try {
-    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-    db = firebase.database();
-    return true;
-  } catch(e) { console.error('Firebase:', e); return false; }
-}
-
-// ═══════════════════════════════════════════════════════
-// LOBBY
-// ═══════════════════════════════════════════════════════
-function initLobby() {
-  if (!initFirebase()) { alert('Erro ao conectar ao Firebase!'); return; }
-  const scroll = document.getElementById('case-scroll');
-  scroll.innerHTML = CASES.map((c,i)=>`
-    <div class="case-chip ${i===0?'active':''}" onclick="selectCase(${i})">${c.id} · ${c.nome}</div>`).join('');
-  initApiKeyUI();
-}
-
-function selectCase(i) {
-  state.caseIdx = i;
-  document.querySelectorAll('.case-chip').forEach((el,j)=>el.classList.toggle('active',j===i));
-}
-function selectRole(r) {
-  state.createRole = r;
-  document.getElementById('rc-acu').classList.toggle('sel', r==='acusacao');
-  document.getElementById('rc-def').classList.toggle('sel', r==='defesa');
-}
-function selectJoinRole(r) {
-  state.joinRole = r;
-  document.getElementById('rj-acu').classList.toggle('sel', r==='acusacao');
-  document.getElementById('rj-def').classList.toggle('sel', r==='defesa');
-}
-
-// ═══════════════════════════════════════════════════════
-// CRIAR SALA
-// ═══════════════════════════════════════════════════════
-async function createRoom() {
-  const name = document.getElementById('inp-name-create').value.trim();
-  if (!name) { alert('Digite seu nome!'); return; }
-  if (!state.createRole) { alert('Escolha seu papel!'); return; }
-  const btn = document.getElementById('btn-create');
-  btn.disabled = true; btn.textContent = 'CRIANDO...';
-  state.myName = name; state.myRole = state.createRole;
-  state.roomCode = Math.random().toString(36).substr(2,4).toUpperCase();
-  roomRef = db.ref(`rooms/${state.roomCode}`);
-  try {
-    const snap = await roomRef.once('value');
-    if (snap.exists()) {
-      state.roomCode = Math.random().toString(36).substr(2,4).toUpperCase();
-      roomRef = db.ref(`rooms/${state.roomCode}`);
-    }
-    await roomRef.set({
-      creator:name, creatorRole:state.myRole, caseIdx:state.caseIdx,
-      scoreAcu:0, scoreDef:0, ready:false,
-      createdAt:firebase.database.ServerValue.TIMESTAMP,
-    });
-    setTimeout(()=>{ if(roomRef) roomRef.remove(); }, 3*60*60*1000);
-    btn.disabled = false; btn.textContent = 'CRIAR SALA';
-    document.getElementById('room-code-display').textContent = state.roomCode;
-    document.getElementById('code-display').style.display = 'block';
-    showWaiting();
-  } catch(e) {
-    btn.disabled = false; btn.textContent = 'CRIAR SALA';
-    alert('Erro ao criar sala: ' + e.message);
-  }
-}
-
-// ═══════════════════════════════════════════════════════
-// ENTRAR EM SALA
-// ═══════════════════════════════════════════════════════
-async function joinRoom() {
-  const name = document.getElementById('inp-name-join').value.trim();
-  const code = document.getElementById('inp-room-code').value.trim().toUpperCase();
-  if (!name) { alert('Digite seu nome!'); return; }
-  if (!state.joinRole) { alert('Escolha seu papel!'); return; }
-  if (code.length !== 4) { alert('Código inválido! Deve ter 4 letras.'); return; }
-  const btn = document.getElementById('btn-join');
-  btn.disabled = true; btn.textContent = 'ENTRANDO...';
-  state.myName = name; state.myRole = state.joinRole; state.roomCode = code;
-  roomRef = db.ref(`rooms/${code}`);
-  try {
-    const snap = await roomRef.once('value');
-    const room = snap.val();
-    if (!room) { btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Sala não encontrada! Código: '+code); return; }
-    if (room.creatorRole === state.myRole) { btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert(`O criador já é ${room.creatorRole==='acusacao'?'Acusação ⚔️':'Defesa 🛡️'}. Escolha o outro papel!`); return; }
-    if (room.partnerName) { btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Sala já está cheia!'); return; }
-    state.caseIdx = room.caseIdx || 0;
-    state.partnerName = room.creator;
-    state.partnerRole = room.creatorRole;
-    await roomRef.update({ partnerName:name, partnerRole:state.myRole, ready:true });
-    btn.disabled=false; btn.textContent='ENTRAR NA SALA';
-    setupRealtimeListeners();
-    launchGame();
-  } catch(e) { btn.disabled=false; btn.textContent='ENTRAR NA SALA'; alert('Erro: '+e.message); }
-}
-
-// ═══════════════════════════════════════════════════════
-// WAITING
-// ═══════════════════════════════════════════════════════
-function showWaiting() {
-  document.getElementById('card-create').style.display = 'none';
-  document.querySelectorAll('.divider').forEach(el=>el.style.display='none');
-  document.getElementById('card-join').style.display = 'none';
-  const cw = document.getElementById('card-waiting');
-  cw.style.display = 'flex'; cw.style.flexDirection = 'column'; cw.style.alignItems = 'center';
-  document.getElementById('waiting-code').textContent = state.roomCode;
-  updateWaitingUI();
-  roomRef.on('value', snap => {
-    const room = snap.val();
-    if (!room) return;
-    if (room.ready && room.partnerName) {
-      state.partnerName = room.partnerName;
-      state.partnerRole = room.partnerRole;
-      updateWaitingUI();
-      roomRef.off();
-      setupRealtimeListeners();
-      setTimeout(()=>launchGame(), 400);
-    }
-  });
-}
-
-function updateWaitingUI() {
-  const list = document.getElementById('players-list');
-  const myLbl = state.myRole==='acusacao'?'⚔️ ACUSAÇÃO':'🛡️ DEFESA';
-  const partLbl = state.partnerName ? (state.partnerRole==='acusacao'?'⚔️ ACUSAÇÃO':'🛡️ DEFESA') : '...';
-  list.innerHTML = `
-    <div class="player-item"><div class="pi-dot ${state.myRole}"></div><div class="pi-name">${state.myName} (você)</div><div class="pi-role">${myLbl}</div></div>
-    <div class="player-item"><div class="pi-dot ${state.partnerName?state.partnerRole:'empty'}"></div><div class="pi-name">${state.partnerName||'Aguardando...'}</div><div class="pi-role">${partLbl}</div></div>`;
-}
-
-function startAnySolo() {
-  state.solo = true;
-  state.partnerName = 'Parceiro';
-  state.partnerRole = state.myRole==='acusacao'?'defesa':'acusacao';
-  if (roomRef) roomRef.off();
-  launchGame();
-}
+// Funções de sala e lobby delegadas para main.js (ES module)
+// initLobby, selectCase, selectRole, selectJoinRole, createRoom, joinRoom, 
+// showWaiting, updateWaitingUI, startAnySolo, setupRealtimeListeners, launchGame
+// são todas exportadas de main.js e vinculadas ao escopo global pelo módulo.
 
 // (file truncated here to fit patch size)
 </script>
