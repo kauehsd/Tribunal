@@ -9,7 +9,13 @@ let roomRef = null;
 let presenceRef = null;
 let localClientId = Math.random().toString(36).slice(2,9);
 
-function initFirebase(){
+          if(roomRef) {
+            await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge', _stage:update.stage, _meta:meta });
+            // se forem perguntas, guarde separadamente para renderização do case/veredito
+            if(update.stage === 'questions'){
+              await roomRef.child('verdict_questions').set({ perguntas_acu: meta.perguntas_acu || [], perguntas_def: meta.perguntas_def || [] });
+            }
+          }
   try{
     if (!window.firebase) throw new Error('Firebase SDK não carregado');
     if (!window.firebase.apps?.length){
@@ -195,6 +201,17 @@ async function requestJudge(){
 }
 
 function renderVerdict(v){ const wrap = $('verdict-wrap'); if(!wrap) return; wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div></div>`; }
+
+// render mais rico: inclui perguntas do juiz se existirem (salvas em verdict_questions)
+async function renderVerdictRich(v){ const wrap = $('verdict-wrap'); if(!wrap) return; let questionsHtml = '';
+  let q = v.questions || null;
+  if(!q && roomRef){ const snap = await roomRef.child('verdict_questions').once('value'); q = snap.val(); }
+  if(q){ const acu = (q.perguntas_acu||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); const def = (q.perguntas_def||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); questionsHtml = `<div class="verdict-questions"><div class="q-block"><div class="q-label">Perguntas para a Acusação</div>${acu}</div><div class="q-block"><div class="q-label">Perguntas para a Defesa</div>${def}</div></div>`; }
+  wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div>${questionsHtml}</div>`;
+}
+
+// backward-compatible entry
+function renderVerdict(v){ renderVerdictRich(v).catch(e=>{ console.warn('renderVerdictRich failed', e); const wrap = $('verdict-wrap'); if(!wrap) return; wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div></div>`; }); }
 
 function renderCaseDetails(caseObj){
   if(!caseObj) return;
