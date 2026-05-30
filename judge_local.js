@@ -83,3 +83,48 @@ export const LocalJudge = (function(){
 
 // Para compatibilidade com scripts antigos que esperam `LocalJudge` global
 if (typeof window !== 'undefined') window.LocalJudge = LocalJudge;
+
+// Função assíncrona para análise com callbacks incrementais (simula streaming)
+if (typeof window !== 'undefined'){
+  window.localJudgeAnalyze = async function(messages, caseObj={}, onUpdate){
+    // onUpdate({ stage:'thinking'|'questions'|'evaluation'|'final', text, meta })
+    onUpdate?.({ stage:'thinking', text:'Juiz está analisando o debate...' });
+    await new Promise(r=>setTimeout(r, 350));
+
+    // extracão simples de tópicos por lado
+    const lastMessages = (messages||[]).slice(-30);
+    const acuMsgs = lastMessages.filter(m=>m.role==='acusacao').map(m=>m.text||'');
+    const defMsgs = lastMessages.filter(m=>m.role==='defesa').map(m=>m.text||'');
+
+    // gerar perguntas baseadas em palavras-chave encontradas
+    function extractQuestions(texts, side){
+      const joined = texts.join('\n').toLowerCase();
+      const qs = [];
+      if(/art\.?\s?\d+/.test(joined)) qs.push('Cite especificamente quais dispositivos legais e como se aplicam aos fatos.');
+      if(/testemunh|ojos|vídeo|imagem|camera|câmer/.test(joined)) qs.push('Apresente cadeia de custódia ou referência às provas materiais (testemunhas, vídeos, perícia).');
+      if(/horar|local|data|alibi/.test(joined)) qs.push('Detalhe cronologia e eventuais álibis.');
+      if(/motiv|discus|intenc/.test(joined)) qs.push('Explique a motivação e intenção por trás dos atos alegados.');
+      if(qs.length===0){ qs.push(side==='acusacao' ? 'Especifique a prova objetiva que sustenta a autoria.' : 'Indique as lacunas probatórias que geram dúvida razoável.'); }
+      return qs.slice(0,3);
+    }
+
+    const questions_acu = extractQuestions(acuMsgs, 'acusacao');
+    const questions_def = extractQuestions(defMsgs, 'defesa');
+
+    onUpdate?.({ stage:'questions', text:'Perguntas geradas pelo Juiz', meta:{ perguntas_acu: questions_acu, perguntas_def: questions_def } });
+    await new Promise(r=>setTimeout(r, 250));
+
+    // gerar intervenção curta
+    const intervention = LocalJudge.generateIntervention(caseObj, lastMessages);
+    onUpdate?.({ stage:'intervention', text: intervention.text, meta:{ score: intervention.score } });
+    await new Promise(r=>setTimeout(r, 300));
+
+    // formato final de veredicto resumido
+    const score = LocalJudge.scoreMessages(lastMessages);
+    const verdict = LocalJudge.formatVerdict(caseObj, score);
+    const finalText = `${verdict.nome_resultado}\n\n${verdict.fundamentacao}\n\nAções recomendadas: ${verdict.pena}`;
+
+    onUpdate?.({ stage:'final', text: finalText, meta:{ verdict } });
+    return { text: finalText, verdict };
+  };
+}

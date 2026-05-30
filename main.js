@@ -138,7 +138,7 @@ async function sendMessage(){
   if(roomRef){ await roomRef.child('chat').push({ ...msg, type:'chat' }); }
   else { appendChatMessage(msg); }
 
-  const judgeTrigger = /^\s*(juiz|juí?z)([\s:,;!?.]|$)/i;
+  const judgeTrigger = /(?:\bjuiz\b|\bjuí?z\b|@juiz)/i;
   if(judgeTrigger.test(text)){
     requestJudge();
   }
@@ -167,15 +167,30 @@ async function requestJudge(){
   // append a placeholder judge message
   if(roomRef) await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:'(analisando...)', ts:Date.now(), type:'judge' });
   try{
-    const answer = await window.askJudge(caseObj, msgs);
-    if(roomRef){ // remove last placeholder? For simplicity push result
-      await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' });
-      await roomRef.child('verdict').set({ text: answer, ts: Date.now() });
-    } else { appendChatMessage({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' }); }
+    // Prefer local judge if available (free, sem chaves)
+    if(window.localJudgeAnalyze){
+      // stream incremental updates
+      await window.localJudgeAnalyze(msgs, caseObj, async (update)=>{
+        try{
+          const text = update?.text || '';
+          const meta = update?.meta || {};
+          // push partial judge messages so both clients vejam progresso
+          if(roomRef) await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge', _stage:update.stage, _meta:meta });
+          else appendChatMessage({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge' });
+        }catch(err){ console.warn('localJudge push failed', err); }
+      });
+      // after streaming, set latest verdict snapshot
+      const final = await window.localJudgeAnalyze(msgs, caseObj, ()=>{});
+      if(roomRef) await roomRef.child('verdict').set({ text: final.text, ts: Date.now(), verdict: final.verdict });
+    } else {
+      // fallback to remote askJudge (ai-bridge)
+      const answer = await window.askJudge(caseObj, msgs);
+      if(roomRef){ await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' }); await roomRef.child('verdict').set({ text: answer, ts: Date.now() }); }
+      else { appendChatMessage({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' }); }
+    }
   }catch(e){
-    // fallback local handled by ai-bridge; but show error
     console.error('judge request failed', e);
-    if(roomRef) await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:'(Falha ao consultar Juiz IA — fallback local aplicado)', ts:Date.now(), type:'judge' });
+    if(roomRef) await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:'(Falha ao consultar Juiz — tente novamente)', ts:Date.now(), type:'judge' });
   }
 }
 
@@ -235,6 +250,8 @@ function renderCaseDetails(caseObj){
 
 function launchGame(){
   document.getElementById('s-lobby').classList.remove('active'); document.getElementById('s-game').classList.add('active');
+  showTab('caso');
+  showNotasTab('pad');
   const caseObj = window.CASES && window.CASES[state.caseIdx];
   if(caseObj){
     renderCaseDetails(caseObj);

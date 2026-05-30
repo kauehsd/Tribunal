@@ -14,11 +14,11 @@ export async function askProxy(caseObj, messages) {
 export async function askGeminiDirect(caseObj, messages, key){
   if(!key) throw new Error('missing_key');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`;
-  const system = `Você é Dr. Augusto Melo, Juiz de direito. Analise e responda de forma direta ao debate abaixo.`;
+  const system = `Você é Dr. Augusto Melo, Juiz de direito experiente em direito penal. Analise o caso de forma objetiva e construtiva, como um juiz real. Em sua resposta, indique claramente as perguntas que a acusação e a defesa devem responder, destaque os pontos fortes e fracos de cada lado, e proponha próximos passos estratégicos para o debate.`;
   const debate = (messages||[]).map(m => `${m.sender || m.role}: ${m.text || m.content || ''}`).join('\n') || 'Nenhum argumento.';
   const body = {
     system_instruction: { parts:[{ text: system }] },
-    contents: [ { role: 'user', parts:[{ text: `CASO: ${(caseObj||{}).titulo || (caseObj||{}).nome || 'Caso genérico'}\n${(caseObj||{}).context_juiz||caseObj.corpo||''}\n\nDEBATE:\n${debate}\n\nResponda de forma sucinta.` }] } ],
+    contents: [ { role: 'user', parts:[{ text: `CASO: ${(caseObj||{}).titulo || (caseObj||{}).nome || 'Caso genérico'}\n${(caseObj||{}).context_juiz||caseObj.corpo||''}\n\nDEBATE:\n${debate}\n\nResponda como um juiz real: faça pelo menos uma pergunta para a acusação e uma para a defesa, avalie a força de cada argumento e sugira o próximo passo do debate.` }] } ],
     generationConfig:{ maxOutputTokens:800, temperature:0.8 }
   };
   const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
