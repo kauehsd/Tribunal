@@ -38,8 +38,6 @@ function initUI(){
   }
 }
 
-function selectCase(i){ if(window.CASES){ state.caseIdx = i; document.querySelectorAll('.case-chip').forEach((el,j)=>el.classList.toggle('active',j===i)); }}
-
 function initLobby(){ if(!initFirebase()){ alert('Erro ao conectar ao Firebase!'); return; } initUI(); initApiKeyUI?.(); }
 
 // state mirrored from inline script
