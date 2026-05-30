@@ -149,13 +149,18 @@ body::before{content:'';position:fixed;inset:0;background:
 /* Bottom Tab Bar */
 .bottom-bar{
   display:flex;
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:0;
   background:rgba(8,8,14,.97);
   backdrop-filter:blur(20px);
   border-top:1px solid var(--b1);
-  padding-bottom:var(--safe-b);
+  padding:10px 0 calc(var(--safe-b) + 10px);
   flex-shrink:0;
   z-index:100;
 }
+.game-body{padding:16px 14px calc(120px + var(--safe-b));}
 .btab{
   flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:10px 4px;min-height:56px;
@@ -525,6 +530,16 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;bac
 }
 .msg-reply-player-btn:hover{border-color:var(--gold);color:var(--gold2);} 
 .msg .mine .msg-reply-player-btn{display:none;} 
+.judge-question-block{margin-bottom:10px;}
+.judge-question-label{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--text3);margin-bottom:8px;}
+.judge-question-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 12px 12px 14px;border-radius:12px;border:1px solid var(--b1);background:var(--s2);margin-bottom:8px;}
+.judge-question-row.answered{border-color:rgba(58,110,201,.2);background:rgba(58,110,201,.08);}
+.judge-question-status{font-family:var(--mono);font-size:9px;color:var(--green2);margin-top:6px;}
+.judge-question-btn{padding:8px 12px;border-radius:10px;border:1px solid var(--b1);background:none;color:var(--text3);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;}
+.judge-question-btn:hover{border-color:var(--gold);color:var(--gold2);background:var(--gold-d);}
+.judge-question-empty{font-size:12px;color:var(--text3);font-style:italic;padding:10px 0;}
+.question-answer-wrap{margin-top:12px;}
+.question-answer-wrap textarea{min-height:88px;}
 /* Pedido tab styles */
 .pedido-sync-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green2);margin-right:5px;animation:pulse 2s infinite;} 
 
@@ -694,6 +709,7 @@ input:disabled{cursor:not-allowed;opacity:.5;}
           <div class="brief-tags" id="g-tags"></div>
           <div class="brief-title" id="g-title"></div>
           <div class="brief-body" id="g-body"></div>
+          <div id="g-context"></div>
         </div>
         <div class="section-lbl" id="g-guide-lbl">// pontos para pensar</div>
         <div id="g-guide"></div>
@@ -708,6 +724,18 @@ input:disabled{cursor:not-allowed;opacity:.5;}
     <div class="tab-panel" id="tab-chat">
       <div class="chat-messages" id="chat-messages">
         <div class="sys-msg">⚖️ Debate iniciado — que comecem os argumentos</div>
+      </div>
+      <div class="card" id="judge-question-panel" style="margin:14px 14px 0;">
+        <div class="section-lbl">// perguntas do juiz</div>
+        <div class="judge-question-state" id="judge-question-state">Sem perguntas ativas do juiz no momento.</div>
+        <div class="judge-question-list" id="judge-question-list"></div>
+        <div class="question-answer-wrap">
+          <textarea class="chat-inp" id="question-answer-text" placeholder="Selecione uma pergunta acima e escreva sua resposta aqui..." rows="3"></textarea>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+            <button class="chat-send" id="question-answer-btn" type="button" onclick="submitJudgeAnswer()" disabled>RESPONDER</button>
+            <button class="btn-secondary" type="button" onclick="clearJudgeQuestionSelection()">CANCELAR</button>
+          </div>
+        </div>
       </div>
       <div class="typing-ind" id="typing-ind">
         <span id="typing-who"></span> está digitando <span class="typing-dots"><span></span><span></span><span></span></span>
@@ -729,7 +757,7 @@ input:disabled{cursor:not-allowed;opacity:.5;}
     <!-- TAB VADE -->
     <div class="tab-panel" id="tab-vade">
       <div class="game-body">
-        <div class="section-lbl">// artigos relevantes — toque para expandir</div>
+        <div class="section-lbl">// VADE mecum — teses, artigos e jurisprudência</div>
         <div class="vade-list" id="vade-grid"></div>
       </div>
     </div>
@@ -896,7 +924,7 @@ input:disabled{cursor:not-allowed;opacity:.5;}
     <button class="btab" onclick="showTab('vade')" data-tab="vade">
       <div class="btab-indicator"></div>
       <div class="btab-icon">📖</div>
-      <span class="btab-label">LEIS</span>
+      <span class="btab-label">VADE</span>
     </button>
     <button class="btab" onclick="showTab('calc')" data-tab="calc">
       <div class="btab-indicator"></div>

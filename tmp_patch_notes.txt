@@ -1,0 +1,1 @@
+Applying patches: add judge rerun debounce and judge_pending flags in main.js; ensure localJudgeAnalyze returns final once; enrich CASES in index.html with antecedentes/contexto fields; commit and push.

@@ -43,13 +43,47 @@ export const LocalJudge = (function(){
     if(tone==='defesa'){ nome_resultado='ABSOLVIDO'; pena = 'Absolvição (in dubio pro reo)' }
     if(tone==='balanced'){ nome_resultado='CONDENAÇÃO PARCIAL'; pena = `${caseObj.penaMin} anos (pena mínima)` }
     const fundamentacao = buildFundamentacao(caseObj, score, tone);
-    return { resultado: tone, nome_resultado, pena, fundamentacao, artigos: caseObj.arts_rapidos || [] };
+    // Considerar antecedentes e contexto social na análise
+    const contextoAnalise = analisarContextoSocial(caseObj, tone);
+    return { resultado: tone, nome_resultado, pena, fundamentacao, artigos: caseObj.arts_rapidos || [], contexto: contextoAnalise };
+  }
+  
+  function analisarContextoSocial(caseObj, tone){
+    const linhas = [];
+    if(caseObj.antecedentes_criminais && caseObj.antecedentes_criminais.includes('primário')){
+      linhas.push('📋 Antecedentes: Réu primário (considerado favorável na dosimetria).');
+    }
+    if(caseObj.antecedentes && caseObj.antecedentes.includes('desemprego')){
+      linhas.push('⚠️ Contexto social: Histórico de desemprego documentado.');
+    }
+    if(caseObj.contexto_social && /(vulnerável|isolamento|pobreza|morador|informal)/i.test(caseObj.contexto_social)){
+      linhas.push('🏘️ Vulnerabilidade social: Acentua atenuantes (Art. 66,II) ou qualifica excludentes.');
+    }
+    if(tone === 'defesa'){
+      linhas.push('✓ A defesa pode invocar circunstâncias pessoais e sociais para mitigação.');
+    }
+    return linhas.join('\n');
   }
 
   function buildFundamentacao(c, score, tone){
     const lines = [];
     lines.push(`RELATÓRIO — Resumo: ${c.titulo}.`);
     lines.push(`Análise sucinta dos argumentos apresentados durante o debate.`);
+    
+    // Análise de antecedentes
+    if(c.antecedentes_criminais){
+      if(c.antecedentes_criminais.includes('primário')) lines.push(`📋 ANTECEDENTES: Réu primário — status favorável na dosimetria (Art. 65,I).`);
+      else lines.push(`📋 ANTECEDENTES: Histórico criminal relevante — agravante considerada (Art. 61,II).`);
+    }
+    
+    // Análise de contexto social
+    if(c.contexto_social){
+      const temVulnerabilidade = c.contexto_social.includes('vulnerável')||c.contexto_social.includes('pobreza')||c.contexto_social.includes('isolamento');
+      const temFamiliar = c.contexto_social.includes('familiar')||c.contexto_social.includes('criança')||c.contexto_social.includes('monoparental');
+      if(temVulnerabilidade) lines.push(`🏘️ CONTEXTO SOCIAL: Vulnerabilidade comprovada — pode fundamentar atenuantes (Art. 66,II).`);
+      if(temFamiliar) lines.push(`👨‍👩‍👧 CONTEXTO FAMILIAR: Circunstâncias familiares relevantes para dosimetria.`);
+    }
+    
     if(tone==='acusacao'){
       lines.push(`A Acusação apresentou pontos factuais que se mostraram mais consistentes diante das evidências discutidas (placar simulado ${score.acusacao}×${score.defesa}).`);
       lines.push(`Foram mencionados artigos-chave: ${ (c.arts_rapidos||[]).slice(0,3).join(', ') }.`);
@@ -57,7 +91,7 @@ export const LocalJudge = (function(){
     } else if(tone==='defesa'){
       lines.push(`A Defesa logrou criar dúvida razoável sobre elementos centrais da tipicidade e/ou autoria (placar simulado ${score.defesa}×${score.acusacao}).`);
       lines.push(`Destaco a ausência de prova robusta de circunstâncias qualificadoras e a presença de teses excludentes.`);
-      lines.push(`Conclusão: absolvição por insuficiência probatória.`);
+      lines.push(`Conclusão: absolvição por insuficiência probatória ou aplicação de excludente/atenuante decisiva.`);
     } else {
       lines.push(`Debate equilibrado; pontos fortes surgiram em ambos os lados e não houve solução unívoca (placar ${score.acusacao}×${score.defesa}).`);
       lines.push(`Sugere-se pena no mínimo legal ou decisão parcial, conforme artigo aplicável.`);
@@ -96,20 +130,35 @@ if (typeof window !== 'undefined'){
     const acuMsgs = lastMessages.filter(m=>m.role==='acusacao').map(m=>m.text||'');
     const defMsgs = lastMessages.filter(m=>m.role==='defesa').map(m=>m.text||'');
 
-    // gerar perguntas baseadas em palavras-chave encontradas
-    function extractQuestions(texts, side){
+    // gerar perguntas baseadas em palavras-chave encontradas + contexto social
+    function extractQuestions(texts, side, caseObj){
       const joined = texts.join('\n').toLowerCase();
       const qs = [];
       if(/art\.?\s?\d+/.test(joined)) qs.push('Cite especificamente quais dispositivos legais e como se aplicam aos fatos.');
       if(/testemunh|ojos|vídeo|imagem|camera|câmer/.test(joined)) qs.push('Apresente cadeia de custódia ou referência às provas materiais (testemunhas, vídeos, perícia).');
       if(/horar|local|data|alibi/.test(joined)) qs.push('Detalhe cronologia e eventuais álibis.');
       if(/motiv|discus|intenc/.test(joined)) qs.push('Explique a motivação e intenção por trás dos atos alegados.');
+      
+      // Perguntas contextuais baseadas em antecedentes e contexto social
+      if(caseObj){
+        if(caseObj.antecedentes_criminais && caseObj.antecedentes_criminais.includes('primário')){
+          if(side==='defesa') qs.push('Como o fato de ser réu primário mitiga a culpabilidade neste caso?');
+        }
+        if(caseObj.contexto_social && (caseObj.contexto_social.includes('vulnerável')||caseObj.contexto_social.includes('pobreza')||caseObj.contexto_social.includes('isolamento'))){
+          if(side==='defesa') qs.push('Qual é o papel da vulnerabilidade social nas atenuantes penais aplicáveis?');
+          if(side==='acusacao') qs.push('A vulnerabilidade social da acusada exclui a responsabilidade penal?');
+        }
+        if(caseObj.antecedentes && (caseObj.antecedentes.includes('desemprego')||caseObj.antecedentes.includes('familiar'))){
+          qs.push('Como circunstâncias pessoais e familiares relevam para a dosimetria da pena?');
+        }
+      }
+      
       if(qs.length===0){ qs.push(side==='acusacao' ? 'Especifique a prova objetiva que sustenta a autoria.' : 'Indique as lacunas probatórias que geram dúvida razoável.'); }
-      return qs.slice(0,3);
+      return qs.slice(0,4); // aumentado para 4 perguntas
     }
 
-    const questions_acu = extractQuestions(acuMsgs, 'acusacao');
-    const questions_def = extractQuestions(defMsgs, 'defesa');
+    const questions_acu = extractQuestions(acuMsgs, 'acusacao', caseObj);
+    const questions_def = extractQuestions(defMsgs, 'defesa', caseObj);
 
     onUpdate?.({ stage:'questions', text:'Perguntas geradas pelo Juiz', meta:{ perguntas_acu: questions_acu, perguntas_def: questions_def } });
     await new Promise(r=>setTimeout(r, 250));

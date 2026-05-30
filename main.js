@@ -9,17 +9,172 @@ let roomRef = null;
 let presenceRef = null;
 let localClientId = Math.random().toString(36).slice(2,9);
 
+let judgeQuestions = { perguntas_acu: [], perguntas_def: [] };
+let judgeAnswers = {};
+let selectedJudgeQuestion = null;
+let currentCalcCase = null;
+const selectedCalcAgg = new Set();
+const selectedCalcMaj = new Set();
+const MODERATION_BLOCKLIST = ['merda','porra','filho da puta','puta','viado','otário','idiota','burro','escroto','imbecil','piranha','moleque'];
+
+function moderateText(text){
+  const normalized = (text||'').toLowerCase();
+  const found = MODERATION_BLOCKLIST.find(w => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`, 'i').test(normalized));
+  return { blocked: Boolean(found), word: found };
+}
+
+function formatJudgeQuestion(question){ return question?.length > 75 ? question.slice(0,72) + '...' : question; }
+
+function renderJudgeQuestions(questions = judgeQuestions, answers = judgeAnswers){
+  const panel = $('judge-question-list');
+  const stateEl = $('judge-question-state');
+  const answerArea = $('question-answer-text');
+  const btn = $('question-answer-btn');
+  if(!panel || !stateEl) return;
+
+  let hasQuestions = false;
+  const sections = ['perguntas_acu','perguntas_def'].map(sideKey => {
+    const title = sideKey === 'perguntas_acu' ? 'Acusação' : 'Defesa';
+    const side = sideKey === 'perguntas_acu' ? 'acu' : 'def';
+    const list = (questions[sideKey]||[]).map((q, idx) => {
+      const answered = answers?.[side]?.[idx];
+      const safeQuestion = JSON.stringify(q).replace(/"/g,'&quot;');
+      return `<div class="judge-question-row ${answered?'answered':''}">
+        <div><strong>${escapeHtml(q)}</strong>${answered?`<div class="judge-question-status">Respondida</div>`:''}</div>
+        <button class="judge-question-btn" type="button" onclick="selectJudgeQuestion('${side}', ${idx}, ${safeQuestion})">${answered?'Rever':'Responder'}</button>
+      </div>`;
+    }).join('');
+    if(list) hasQuestions = true;
+    return `<div class="judge-question-block"><div class="judge-question-label">Perguntas para ${title}</div>${list || '<div class="judge-question-empty">Sem perguntas registradas.</div>'}</div>`;
+  }).join('');
+
+  panel.innerHTML = sections;
+  if(!hasQuestions){ stateEl.textContent = 'Sem perguntas ativas do juiz no momento.'; btn.disabled = true; if(answerArea) answerArea.value = ''; selectedJudgeQuestion = null; }
+  else {
+    const pending = questions.perguntas_acu.length + questions.perguntas_def.length > 0;
+    stateEl.textContent = pending ? 'Selecione uma pergunta e responda para disparar nova análise do juiz.' : 'Sem perguntas ativas.';
+    btn.disabled = !selectedJudgeQuestion;
+  }
+}
+
+function selectJudgeQuestion(side, index, question){
+  selectedJudgeQuestion = { side, index, question };
+  const answerArea = $('question-answer-text');
+  const banner = $('reply-banner');
+  if(answerArea){ answerArea.value = `Resposta à pergunta: ${question}\n`; answerArea.focus(); }
+  if(banner){ banner.classList.add('show'); $('reply-banner-text').textContent = `Respondendo pergunta: ${formatJudgeQuestion(question)}`; }
+  const btn = $('question-answer-btn'); if(btn) btn.disabled = false;
+}
+
+function clearJudgeQuestionSelection(){
+  selectedJudgeQuestion = null;
+  const answerArea = $('question-answer-text'); if(answerArea) answerArea.value = '';
+  const banner = $('reply-banner'); if(banner){ banner.classList.remove('show'); $('reply-banner-text').textContent = ''; }
+  const btn = $('question-answer-btn'); if(btn) btn.disabled = true;
+}
+
+async function submitJudgeAnswer(){
+  const textArea = $('question-answer-text');
+  if(!textArea) return;
+  const text = textArea.value.trim();
+  if(!text){ showToast('Escreva sua resposta antes de enviar.'); return; }
+  if(!selectedJudgeQuestion){ showToast('Selecione a pergunta que deseja responder.'); return; }
+
+  const moderation = moderateText(text);
+  if(moderation.blocked){ showToast(`⚠️ Palavra sensível detectada: ${moderation.word}`); }
+
+  const msg = {
+    sender: state.myName,
+    role: state.myRole,
+    text: `Resposta à pergunta do juiz: ${selectedJudgeQuestion.question}\n\n${text}`,
+    ts: Date.now(),
+    type: 'chat',
+    question_reply: true,
+    question_side: selectedJudgeQuestion.side,
+    question_index: selectedJudgeQuestion.index
+  };
+  if(roomRef){
+    await roomRef.child('chat').push(msg);
+    await roomRef.child('judge_answers').child(selectedJudgeQuestion.side).child(selectedJudgeQuestion.index.toString()).set({
+      question: selectedJudgeQuestion.question,
+      answer: text,
+      sender: state.myName,
+      role: state.myRole,
+      ts: Date.now()
+    });
+    await roomRef.child('judge_pending').set(true);
+  } else {
+    appendChatMessage(msg);
+  }
+  clearJudgeQuestionSelection();
+  if(roomRef) scheduleJudgeRerun(800);
+}
+
 // debounce timer for auto re-running judge when players respond
 let judgeDebounceTimer = null;
 function scheduleJudgeRerun(delay=1800){ if(judgeDebounceTimer) clearTimeout(judgeDebounceTimer); judgeDebounceTimer = setTimeout(async ()=>{ try{ if(!roomRef) return; const snap = await roomRef.child('judge_pending').once('value'); if(snap && snap.val()){ requestJudge(); } }catch(e){ console.warn('scheduleJudgeRerun failed', e); } }, delay); }
 
-          if(roomRef) {
-            await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge', _stage:update.stage, _meta:meta });
-            // se forem perguntas, guarde separadamente para renderização do case/veredito
-            if(update.stage === 'questions'){
-              await roomRef.child('verdict_questions').set({ perguntas_acu: meta.perguntas_acu || [], perguntas_def: meta.perguntas_def || [] });
-            }
-          }
+function parsePenaEf(effect){
+  if(!effect) return 0;
+  const text = String(effect).trim();
+  if(/qualifica/i.test(text)) return text.startsWith('-') ? -2 : 2;
+  const frac = text.match(/([+-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
+  if(frac){ return Number(frac[1]) / Number(frac[2]); }
+  const num = text.match(/([+-]?\d+(?:\.\d+)?)/);
+  return num ? Number(num[1]) : 0;
+}
+
+function roundPena(value){ return Math.round((value + Number.EPSILON) * 100) / 100; }
+
+function updateCalcDisplay(caseObj){
+  if(!caseObj) return;
+  const slider = $('sl-pb'); if(!slider) return;
+  const min = Number(caseObj.penaMin || 0);
+  const max = Number(caseObj.penaMax || min);
+  const baseValue = min + (max - min) * (Number(slider.value) / 100);
+  const aggSum = Array.from(selectedCalcAgg).reduce((sum, idx) => sum + parsePenaEf(caseObj.agravantes?.[idx]?.ef), 0);
+  const majSum = Array.from(selectedCalcMaj).reduce((sum, idx) => sum + parsePenaEf(caseObj.majorantes?.[idx]?.ef), 0);
+  const total = Math.max(0, baseValue + aggSum + majSum);
+  const regime = total <= 4 ? 'Provável regime: aberto / semiaberto' : 'Provável regime: fechado';
+
+  $('calc-big').innerHTML = `${roundPena(total)}<span> anos</span>`;
+  $('calc-regime').textContent = regime;
+  const regimeText = $('regime-txt'); if(regimeText) regimeText.textContent = regime;
+  $('ph1').textContent = `${roundPena(baseValue)} anos`;
+  $('ph2').textContent = `${roundPena(baseValue + aggSum)} anos`;
+  $('ph3').textContent = `${roundPena(total)} anos`;
+  $('sl-val').textContent = `${Math.round(Number(slider.value))}%`;
+}
+
+function calcPena(){ updateCalcDisplay(currentCalcCase); }
+
+function toggleCalcFactor(section, idx){
+  const index = Number(idx);
+  const set = section === 'agg' ? selectedCalcAgg : selectedCalcMaj;
+  if(set.has(index)) set.delete(index); else set.add(index);
+  const grid = section === 'agg' ? $('chk-agg') : $('chk-maj');
+  const btn = grid?.querySelector(`button[data-index="${index}"]`);
+  if(btn){ btn.classList.toggle('on-agg', section==='agg' && set.has(index)); btn.classList.toggle('on-ate', section==='maj' && set.has(index)); }
+  updateCalcDisplay(currentCalcCase);
+}
+
+function initializeCalcPanel(caseObj){
+  currentCalcCase = caseObj;
+  selectedCalcAgg.clear();
+  selectedCalcMaj.clear();
+  const aggGrid = $('chk-agg');
+  const majGrid = $('chk-maj');
+  if(aggGrid){
+    aggGrid.innerHTML = (caseObj.agravantes||[]).map((item,i)=>`<button type="button" class="chk-item" data-index="${i}" onclick="toggleCalcFactor('agg',${i})"><div class="chk-box"></div><div><div class="chk-lbl">${escapeHtml(item.t)}</div><div class="chk-ef">${escapeHtml(item.ef)}</div></div></button>`).join('') || '<div class="msg">Nenhum agravante registrado.</div>';
+  }
+  if(majGrid){
+    majGrid.innerHTML = (caseObj.majorantes||[]).map((item,i)=>`<button type="button" class="chk-item" data-index="${i}" onclick="toggleCalcFactor('maj',${i})"><div class="chk-box"></div><div><div class="chk-lbl">${escapeHtml(item.t)}</div><div class="chk-ef">${escapeHtml(item.ef)}</div></div></button>`).join('') || '<div class="msg">Nenhum fator adicional registrado.</div>';
+  }
+  const slider = $('sl-pb'); if(slider){ slider.value = 50; slider.min = 0; slider.max = 100; }
+  updateCalcDisplay(caseObj);
+}
+
+async function initFirebase(){
   try{
     if (!window.firebase) throw new Error('Firebase SDK não carregado');
     if (!window.firebase.apps?.length){
@@ -121,11 +276,17 @@ function setupRealtimeListeners(){
       }
     }catch(e){ console.warn('chat child_added handler', e); }
   });
+  // judge questions
+  roomRef.child('verdict_questions').on('value', s => { judgeQuestions = s.val() || { perguntas_acu: [], perguntas_def: [] }; renderJudgeQuestions(); });
+  roomRef.child('judge_answers').on('value', s => { judgeAnswers = s.val() || {}; renderJudgeQuestions(); });
+  roomRef.child('judge_pending').on('value', s => { const pending = s.val(); const badge = $('veredito-notif'); if(badge){ badge.classList.toggle('show', Boolean(pending)); } });
   // score
   roomRef.child('scoreAcu').on('value', s => { const v = s.val(); if(v!==null) $('sc-acu').textContent = v; });
   roomRef.child('scoreDef').on('value', s => { const v = s.val(); if(v!==null) $('sc-def').textContent = v; });
   // notes
-  roomRef.child('notes').on('value', s => { const v = s.val(); if(v!==null) $('notas-ta').value = v; });
+  roomRef.child('notes').on('value', s => { const v = s.val(); if(v!==null){ const ta = $('notas-ta'); if(ta) ta.value = v; updateNotasCount(); } });
+  // IA assistant chat
+  roomRef.child('ia_chat').on('child_added', snap => { const msg = snap.val(); if(!msg) return; appendIaMessage(msg); });
   // verdict
   roomRef.child('verdict').on('value', s=>{ const v = s.val(); if(v) renderVerdict(v); });
   // presence
@@ -149,7 +310,10 @@ function appendChatMessage(msg){
 function escapeHtml(s){ return (s||'').replace(/[&<>\"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
 
 async function sendMessage(){
-  const ta = $('chat-inp'); if(!ta) return; const text = ta.value.trim(); if(!text) return; ta.value='';
+  const ta = $('chat-inp'); if(!ta) return; const text = ta.value.trim(); if(!text) return;
+  const moderation = moderateText(text);
+  if(moderation.blocked){ showToast(`⚠️ Palavra sensível detectada: ${moderation.word}`); }
+  ta.value='';
   const msg = { sender: state.myName, role: state.myRole, text, ts: Date.now() };
   if(roomRef){ await roomRef.child('chat').push({ ...msg, type:'chat' }); }
   else { appendChatMessage(msg); }
@@ -163,14 +327,17 @@ async function sendMessage(){
 async function addScore(side){ if(!roomRef) return; if(side==='acu') roomRef.child('scoreAcu').transaction(v=> (v||0)+1); else roomRef.child('scoreDef').transaction(v=> (v||0)+1); }
 function resetScore(){ if(roomRef){ roomRef.child('scoreAcu').set(0); roomRef.child('scoreDef').set(0); } }
 
-async function sendIaMsg(){ const ta = $('ia-inp'); if(!ta) return; const text = ta.value.trim(); if(!text) return; ta.value='';
-  // push to ia chat locally
-  if(roomRef) await roomRef.child('ia_chat').push({ sender: state.myName, text, ts:Date.now() });
-  // call assistant via global callAI / askJudge (ai-bridge exposes callAI too)
+async function sendIaMsg(){ const ta = $('ia-inp'); if(!ta) return; const text = ta.value.trim(); if(!text) return;
+  const moderation = moderateText(text);
+  if(moderation.blocked){ showToast(`Mensagem bloqueada por moderação local: ${moderation.word}`); return; }
+  ta.value='';
+  const userMsg = { sender: state.myName, text, ts: Date.now(), type:'user' };
+  if(roomRef){ await roomRef.child('ia_chat').push(userMsg); } else { appendIaMessage(userMsg); }
   try{
     const resp = await window.callAI?.('Assistente', text, 400, []);
-    if(resp){ if(roomRef) await roomRef.child('ia_chat').push({ sender:'Assistente', text:resp, ts:Date.now(), type:'ai' }); }
-  }catch(e){ console.warn('assist fail', e); }
+    const reply = { sender:'Assistente', text: resp || 'Não foi possível obter resposta no momento.', ts: Date.now(), type:'ai' };
+    if(roomRef){ await roomRef.child('ia_chat').push(reply); } else { appendIaMessage(reply); }
+  }catch(e){ console.warn('assist fail', e); const errMsg = { sender:'Assistente', text:'Falha ao consultar o assistente IA. Tente novamente.', ts: Date.now(), type:'ai' }; if(roomRef){ await roomRef.child('ia_chat').push(errMsg); } else { appendIaMessage(errMsg); } }
 }
 
 async function requestJudge(){
@@ -217,10 +384,9 @@ async function requestJudge(){
   }
 }
 
-function renderVerdict(v){ const wrap = $('verdict-wrap'); if(!wrap) return; wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div></div>`; }
-
 // render mais rico: inclui perguntas do juiz se existirem (salvas em verdict_questions)
 async function renderVerdictRich(v){ const wrap = $('verdict-wrap'); if(!wrap) return; let questionsHtml = '';
+  if(!v || !v.text){ wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Aguardando veredicto</div></div></div><div class="verdict-fund">Nenhum veredito registrado ainda. Use a aba <strong>DEBATE</strong> e clique em <strong>JUIZ</strong> para iniciar a análise. Você também pode pedir uma resposta por perguntas do juiz.</div><div style="margin-top:16px;text-align:center;"><button class="btn-primary" onclick="requestJudge()">Pedir veredicto</button></div></div>`; return; }
   let q = v.questions || null;
   if(!q && roomRef){ const snap = await roomRef.child('verdict_questions').once('value'); q = snap.val(); }
   if(q){ const acu = (q.perguntas_acu||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); const def = (q.perguntas_def||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); questionsHtml = `<div class="verdict-questions"><div class="q-block"><div class="q-label">Perguntas para a Acusação</div>${acu}</div><div class="q-block"><div class="q-label">Perguntas para a Defesa</div>${def}</div></div>`; }
@@ -228,14 +394,25 @@ async function renderVerdictRich(v){ const wrap = $('verdict-wrap'); if(!wrap) r
 }
 
 // backward-compatible entry
-function renderVerdict(v){ renderVerdictRich(v).catch(e=>{ console.warn('renderVerdictRich failed', e); const wrap = $('verdict-wrap'); if(!wrap) return; wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div></div>`; }); }
+function renderVerdict(v){ renderVerdictRich(v).catch(e=>{ console.warn('renderVerdictRich failed', e); const wrap = $('verdict-wrap'); if(!wrap) return; wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v?.text||'Nenhum veredito registrado ainda.')} </div></div>`; }); }
 
 function renderCaseDetails(caseObj){
   if(!caseObj) return;
-  const tags = caseObj.tags || [];
-  $('g-tags').innerHTML = tags.map(t=>`<span class="tag ${escapeHtml(t.c||'tg')}">${escapeHtml(t.t)}</span>`).join('');
+  $('g-tags').innerHTML = (caseObj.tags || []).map(t=>`<span class="tag ${escapeHtml(t.c||'tg')}">${escapeHtml(t.t)}</span>`).join('');
   $('g-title').innerHTML = caseObj.titulo || '';
   $('g-body').innerHTML = caseObj.corpo || caseObj.context_juiz || '';
+
+  const contextBlock = [];
+  if(caseObj.contexto_social){
+    contextBlock.push(`<div class="card"><div class="section-lbl">// contexto social</div><div class="brief-body">${escapeHtml(caseObj.contexto_social)}</div></div>`);
+  }
+  if(caseObj.antecedentes || caseObj.antecedentes_criminais){
+    contextBlock.push(`<div class="card"><div class="section-lbl">// antecedentes</div>${caseObj.antecedentes?`<div class="brief-body"><strong>Perfil social:</strong> ${escapeHtml(caseObj.antecedentes)}</div>`:''}${caseObj.antecedentes_criminais?`<div class="brief-body" style="margin-top:10px;"><strong>Antecedentes criminais:</strong> ${escapeHtml(caseObj.antecedentes_criminais)}</div>`:''}</div>`);
+  }
+  if(caseObj.context_juiz){
+    contextBlock.push(`<div class="card"><div class="section-lbl">// resumo para o juiz</div><div class="brief-body">${escapeHtml(caseObj.context_juiz).replace(/\n/g,'<br>')}</div></div>`);
+  }
+  $('g-context').innerHTML = contextBlock.join('');
 
   const guide = $('g-guide');
   const hot = $('g-hot');
@@ -247,8 +424,8 @@ function renderCaseDetails(caseObj){
     if(caseObj.perguntas_def?.length){
       sections.push(`<div class="art-strategy-block asb-def"><div class="asb-label">Perguntas da Defesa</div><div>${caseObj.perguntas_def.map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
     }
-    if(!sections.length && caseObj.hot?.length){
-      sections.push(`<div class="art-strategy-block"><div class="asb-label">Pontos-chave</div><div>${caseObj.hot.map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
+    if(caseObj.arts_rapidos?.length){
+      sections.push(`<div class="art-strategy-block"><div class="asb-label">Pontos-chave</div><div>${caseObj.arts_rapidos.map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
     }
     guide.innerHTML = sections.join('');
   }
@@ -256,31 +433,24 @@ function renderCaseDetails(caseObj){
     hot.innerHTML = (caseObj.hot||[]).map(item=>`<div class="art-texto">• ${escapeHtml(item)}</div>`).join('');
   }
 
+  const quick = $('art-quick-row');
+  if(quick){
+    quick.innerHTML = (caseObj.arts_rapidos||[]).map(item=>`<button type="button" class="art-quick-pill" onclick="iaQuickAsk('Explique como usar ${escapeHtml(item)} no caso ${escapeHtml(caseObj.titulo)}')">${escapeHtml(item)}</button>`).join('');
+  }
+
   const vadeGrid = $('vade-grid');
   if(vadeGrid){
     vadeGrid.innerHTML = (caseObj.vade||[]).map(item => {
       const roleText = state.myRole==='acusacao' ? item.use_acu : item.use_def;
-      return `<div class="art-card expanded">
-        <div class="art-header">
-          <div class="art-header-content">
-            <div class="art-name">${escapeHtml(item.nome)}</div>
-            <div class="art-pena">${escapeHtml(item.pena||'')}</div>
-          </div>
-          <div class="art-chevron">›</div>
-        </div>
-        <div class="art-body">
-          <div class="art-texto">${escapeHtml(item.texto)}</div>
-          <div class="art-exp">${escapeHtml(item.exp||'')}</div>
-          <div class="art-juris">${escapeHtml(item.juris||'')}</div>
-          <div class="art-simple">
-            <div class="art-simple-lbl">Estratégia para ${state.myRole==='acusacao'?'Acusação':'Defesa'}</div>
-            <div class="art-simple-txt">${escapeHtml(roleText||'')}</div>
-          </div>
-        </div>
-      </div>`;
+      return `<div class="art-card" onclick="toggleArtCard(this)"><div class="art-header"><div class="art-header-content"><div class="art-name">${escapeHtml(item.nome)}</div><div class="art-pena">${escapeHtml(item.pena||'')}</div></div><div class="art-chevron">›</div></div><div class="art-body"><div class="art-texto">${escapeHtml(item.texto)}</div><div class="art-exp">${escapeHtml(item.exp||'')}</div><div class="art-juris">${escapeHtml(item.juris||'')}</div><div class="art-simple"><div class="art-simple-lbl">Estratégia para ${state.myRole==='acusacao'?'Acusação':'Defesa'}</div><div class="art-simple-txt">${escapeHtml(roleText||'')}</div></div></div></div>`;
     }).join('');
   }
+  initializeCalcPanel(caseObj);
 }
+
+function toggleArtCard(el){ const card = el.closest('.art-card'); if(!card) return; card.classList.toggle('expanded'); }
+function appendIaMessage(msg){ const container = $('ia-chat-msgs'); if(!container) return; const el = document.createElement('div'); el.className = `ia-msg ${msg.type==='ai' ? 'ai' : 'user'}`; el.innerHTML = `<div class="ia-msg-sender">${escapeHtml(msg.sender)}</div><div class="ia-msg-bubble">${escapeHtml(msg.text).replace(/\n/g,'<br>')}</div>`; container.appendChild(el); container.scrollTop = container.scrollHeight; }
+function updateNotasCount(){ const ta = $('notas-ta'); if(!ta) return; const chars = ta.value.length; const label = $('notas-chars'); if(label) label.textContent = `${chars} caracteres`; }
 
 function launchGame(){
   document.getElementById('s-lobby').classList.remove('active'); document.getElementById('s-game').classList.add('active');
@@ -290,18 +460,20 @@ function launchGame(){
   if(caseObj){
     renderCaseDetails(caseObj);
   }
+  updateNotasCount();
+  renderJudgeQuestions();
   $('gtb-title').textContent = `Sala ${state.roomCode} • ${caseObj?caseObj.nome:''}`;
   $('gtb-role-txt').textContent = state.myRole==='acusacao'?'ACUSAÇÃO':'DEFESA';
 }
 
-function selectCase(i){ if(window.CASES){ state.caseIdx = i; document.querySelectorAll('.case-chip').forEach((el,j)=>el.classList.toggle('active',j===i)); }}
+function selectCase(i){ if(window.CASES){ state.caseIdx = i; document.querySelectorAll('.case-chip').forEach((el,j)=>el.classList.toggle('active',j===i)); const caseObj = window.CASES[i]; if(caseObj){ renderCaseDetails(caseObj); const title = $('gtb-title'); if(title) title.textContent = `Sala ${state.roomCode} • ${caseObj.nome}`; } }}
 
 function selectRole(r){ state.createRole = r; document.getElementById('rc-acu')?.classList.toggle('sel', r==='acusacao'); document.getElementById('rc-def')?.classList.toggle('sel', r==='defesa'); }
 
 function selectJoinRole(r){ state.joinRole = r; document.getElementById('rj-acu')?.classList.toggle('sel', r==='acusacao'); document.getElementById('rj-def')?.classList.toggle('sel', r==='defesa'); }
 
 // expose helpers to global scope for inline handlers
-window.createRoom = createRoom; window.joinRoom = joinRoom; window.startAnySolo = startAnySolo; window.sendMessage = sendMessage; window.addScore = addScore; window.resetScore = resetScore; window.requestJudge = requestJudge; window.launchGame = launchGame; window.selectCase = selectCase; window.selectRole = selectRole; window.selectJoinRole = selectJoinRole; window.initLobby = initLobby;
+window.createRoom = createRoom; window.joinRoom = joinRoom; window.startAnySolo = startAnySolo; window.sendMessage = sendMessage; window.addScore = addScore; window.resetScore = resetScore; window.requestJudge = requestJudge; window.launchGame = launchGame; window.selectCase = selectCase; window.selectRole = selectRole; window.selectJoinRole = selectJoinRole; window.initLobby = initLobby; window.selectJudgeQuestion = selectJudgeQuestion; window.clearJudgeQuestionSelection = clearJudgeQuestionSelection; window.submitJudgeAnswer = submitJudgeAnswer;
 
 // init on DOM ready
 window.addEventListener('DOMContentLoaded', ()=>{ initUI(); initFirebase(); });
@@ -315,17 +487,17 @@ function backToLobby(){
 function showTab(tab){ document.querySelectorAll('.tab-panel').forEach(p=>p.classList.toggle('active', p.id===`tab-${tab}`)); document.querySelectorAll('.btab').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab)); }
 
 function onChatInput(){ const ta = $('chat-inp'); if(ta) ta.style.height = 'auto'; if(ta) ta.style.height = Math.min(120, ta.scrollHeight)+'px'; }
-function onChatKey(e){}
+function onChatKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); } }
 function onIaInpInput(){ const ta = $('ia-inp'); if(ta) ta.style.height='auto'; if(ta) ta.style.height = Math.min(120, ta.scrollHeight)+'px'; }
-function onIaInpKey(e){}
+function onIaInpKey(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendIaMsg(); } }
 
-function onNotasInput(){ const ta = $('notas-ta'); if(!ta) return; $('notas-chars').textContent = ta.value.length + ' caracteres'; if(roomRef) roomRef.child('notes').set(ta.value); }
+function onNotasInput(){ const ta = $('notas-ta'); if(!ta) return; updateNotasCount(); if(roomRef) roomRef.child('notes').set(ta.value); }
 function clearNotas(){ const ta = $('notas-ta'); if(ta) ta.value=''; if(roomRef) roomRef.child('notes').set(''); }
 
 function iaQuickAsk(q){ const ta = $('ia-inp'); if(!ta) return; ta.value = q; sendIaMsg(); }
 
 // Expose simple handlers globally
-window.backToLobby = backToLobby; window.showTab = showTab; window.onChatInput = onChatInput; window.onChatKey = onChatKey; window.onIaInpInput = onIaInpInput; window.onIaInpKey = onIaInpKey; window.onNotasInput = onNotasInput; window.clearNotas = clearNotas; window.iaQuickAsk = iaQuickAsk;
+window.backToLobby = backToLobby; window.showTab = showTab; window.onChatInput = onChatInput; window.onChatKey = onChatKey; window.onIaInpInput = onIaInpInput; window.onIaInpKey = onIaInpKey; window.onNotasInput = onNotasInput; window.clearNotas = clearNotas; window.iaQuickAsk = iaQuickAsk; window.calcPena = calcPena; window.toggleCalcFactor = toggleCalcFactor;
 
 function showNotasTab(tab){ document.getElementById('notas-panel-pad').classList.toggle('active', tab==='pad'); document.getElementById('notas-panel-ia').classList.toggle('active', tab==='ia'); document.querySelectorAll('.notas-tab').forEach(b=>b.classList.toggle('active', b.textContent.includes(tab==='pad'?'ANOTAÇÕES':'ASSISTENTE'))); }
 
