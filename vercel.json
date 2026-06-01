@@ -9,6 +9,6 @@
   ],
   "routes": [
     { "src": "/api/judge", "dest": "/api/judge.js" },
-    { "src": "(.*)", "dest": "/$1" }
+    { "src": "/(.*)", "dest": "/$1" }
   ]
 }

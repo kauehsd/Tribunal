@@ -81,10 +81,12 @@ export async function askCloudflareDirect(caseObj, messages, key){
   if(/^cfut_/.test(key) || /^pk_/.test(key) || /^sk_/.test(key)){
     accountId = await resolveCloudflareAccountId(key);
   }
-  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/text/generate`;
-  const body = { model:'gpt-4o-mini', input: buildJudgePrompt(caseObj, messages), max_output_tokens:800, temperature:0.8 };
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/meta/llama-3.1-8b-instruct`;
+  const systemPrompt = 'Você é Dr. Augusto Melo, Juiz de direito experiente em direito penal. Analise o caso de forma objetiva e construtiva.';
+  const debate = buildJudgePrompt(caseObj, messages);
+  const body = { messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: debate }], max_tokens: 800 };
   const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`}, body:JSON.stringify(body) });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.errors?.[0]?.message || data?.error || 'cloudflare_error');
-  return parseAiResponse(data);
+  return data?.result?.response || '';
 }
