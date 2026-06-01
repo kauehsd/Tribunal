@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "builds": [
+    { "src": "api/**/*.js", "use": "@vercel/node" },
+    { "src": "index.html", "use": "@vercel/static" },
+    { "src": "*.js", "use": "@vercel/static" },
+    { "src": "modules/**/*.js", "use": "@vercel/static" },
+    { "src": "*.css", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/api/judge", "dest": "/api/judge.js" },
+    { "src": "(.*)", "dest": "/$1" }
+  ]
+}
