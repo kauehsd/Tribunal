@@ -1,32 +1,60 @@
 import { LocalJudge } from './judge_local.js';
-import { askProxy, askGeminiDirect } from './modules/ai_client.js';
+import { askProxy, askGeminiDirect, askCerebrasDirect, askCloudflareDirect } from './modules/ai_client.js';
 
-function getKey(){ return localStorage.getItem('tribunal_gemini_key') || ''; }
+function getKey(){ return localStorage.getItem('tribunal_gemini_key') || window.DEFAULT_GEMINI_KEY || ''; }
+function getCerebrasKey(){ return localStorage.getItem('tribunal_cerebras_key') || window.DEFAULT_CEREBRAS_KEY || ''; }
+function getCloudflareKey(){ return localStorage.getItem('tribunal_cloudflare_key') || window.DEFAULT_CLOUDFLARE_KEY || ''; }
 
-export async function askJudge(caseObj, messages){
-  // 1) try same-origin proxy /api/judge
+async function tryFallbackAIs(caseObj, messages){
+  // proxy first
   try{
     const txt = await askProxy(caseObj, messages);
     if(txt) return txt;
   }catch(e){ console.warn('proxy failed', e.message||e); }
 
-  // 2) try direct Gemini with client key (if present)
-  const key = getKey();
-  if(key){
+  // Gemini
+  const geminiKey = getKey();
+  if(geminiKey){
     try{
-      const txt = await askGeminiDirect(caseObj, messages, key);
+      const txt = await askGeminiDirect(caseObj, messages, geminiKey);
       if(txt) return txt;
     }catch(e){ console.warn('gemini direct failed', e.message||e); }
   }
 
-  // 3) fallback to local judge
+  // Cerebras
+  const cerebrasKey = getCerebrasKey();
   try{
-    const local = LocalJudge.generateIntervention(caseObj, messages);
-    return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
+    const txt = await askCerebrasDirect(caseObj, messages, cerebrasKey);
+    if(txt) return txt;
+  }catch(e){ console.warn('cerebras direct failed', e.message||e); }
+
+  // Cloudflare AI if configured
+  const cloudflareKey = getCloudflareKey();
+  if(cloudflareKey){
+    try{
+      const txt = await askCloudflareDirect(caseObj, messages, cloudflareKey);
+      if(txt) return txt;
+    }catch(e){ console.warn('cloudflare direct failed', e.message||e); }
+  }
+
+  // fallback local
+  const local = LocalJudge.generateIntervention(caseObj, messages);
+  return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
+}
+
+export async function askJudge(caseObj, messages){
+  try{
+    return await tryFallbackAIs(caseObj, messages);
   }catch(e){
-    console.error('local judge failed', e);
+    console.error('all judge providers failed', e);
     throw new Error('all_judges_failed');
   }
+}
+
+export async function askAI(systemPrompt, userPrompt, maxTokens=800, history=[]){
+  const messages = [...history, { sender:'Usuário', role:'user', text:userPrompt }];
+  const caseObj = { titulo:'Assistente IA', context_juiz:userPrompt };
+  return await tryFallbackAIs(caseObj, messages);
 }
 
 // Backwards-compatible global bindings used by inline scripts
@@ -35,9 +63,8 @@ if(typeof window !== 'undefined'){
   window.AIJudge = { ask: askJudge };
   // override older helpers if present
   window.callGemini = async function(system, userPrompt, maxTokens){
-    // try to map to askJudge using userPrompt as last message
     const fallbackCase = { titulo: 'Caso genérico', context_juiz: userPrompt };
     return await askJudge(fallbackCase, [{ sender: 'Usuário', role: 'user', text: userPrompt }]);
   };
-  window.callAI = window.callGemini;
+  window.callAI = askAI;
 }

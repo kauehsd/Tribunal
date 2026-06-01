@@ -17,9 +17,31 @@ Abra `index.html` no navegador (duplo clique) para testar. Para deploy grátis, 
 2. Adicione estes arquivos e faça push
 3. Em Settings → Pages, ative a branch `main` como source
 
-## Chave Gemini (opcional)
+## Chaves de API e fallback
 
-Se você tiver uma chave Google Gemini válida, cole-a no campo do topo. O frontend tentará usar a API. Se a chave estiver ausente ou sem quota, o sistema usa o `LocalJudge` como fallback.
+O projeto suporta uma cadeia de fallback de IA para manter o Juiz estável:
+
+1. proxy `/api/judge` (quando configurado)
+2. Google Gemini
+3. Cerebras (Llama 3.3)
+4. Cloudflare AI
+5. `LocalJudge` local como fallback final
+
+As chaves podem ser definidas diretamente no código em `index.html` usando as variáveis globais:
+
+- `window.DEFAULT_GEMINI_KEY`
+- `window.DEFAULT_CEREBRAS_KEY`
+- `window.DEFAULT_CLOUDFLARE_KEY`
+
+Isso permite que o Juiz seja ativado automaticamente no carregamento, sem precisar inserir a chave manualmente a cada vez.
+
+### Recomendação
+
+- Insira sua chave Gemini para ter o melhor veredito.
+- Adicione uma chave Cerebras como fallback rápido e gratuito.
+- A chave Cloudflare é opcional e aumenta a disponibilidade adicional.
+
+Se nenhuma chave estiver disponível, o código ainda funciona com `judge_local.js`.
 
 ## Próximos passos sugeridos
 

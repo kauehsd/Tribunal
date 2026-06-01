@@ -244,9 +244,10 @@ body::before{content:'';position:fixed;inset:0;background:
 .art-simple-txt{font-size:12px;color:var(--text2);line-height:1.55;}
 
 /* ══ CHAT ══ */
-#tab-chat{display:none;flex-direction:column;}
+#tab-chat{display:none;flex-direction:column;overflow:hidden;}
 #tab-chat.active{display:flex;}
 .chat-messages{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 14px 8px;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:var(--b2) transparent;min-height:0;}
+.chat-input-wrap{position:sticky;bottom:0;z-index:1;}
 .chat-messages::-webkit-scrollbar{width:4px;}
 .chat-messages::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px;}
 .msg{display:flex;flex-direction:column;max-width:85%;animation:fadeUp .2s ease;}
@@ -317,7 +318,7 @@ body::before{content:'';position:fixed;inset:0;background:
 .slider-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
 .slider-lbl{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);}
 .slider-val{font-family:var(--mono);font-size:11px;color:var(--gold2);}
-input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:2px;background:var(--b2);outline:none;cursor:pointer;margin-bottom:16px;}
+input[type=range]{appearance:none;-webkit-appearance:none;width:100%;height:4px;border-radius:2px;background:var(--b2);outline:none;cursor:pointer;margin-bottom:16px;}
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:26px;height:26px;border-radius:50%;background:var(--gold);cursor:pointer;transition:transform .15s;}
 input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2);}
 input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;background:var(--gold);cursor:pointer;border:none;}
@@ -607,16 +608,18 @@ input:disabled{cursor:not-allowed;opacity:.5;}
 
   <!-- API KEY -->
   <div class="lobby-card" style="max-width:480px;">
-    <div class="lc-title">// juiz ia — chave google gemini (grátis)</div>
+    <div class="lc-title">// juiz ia — chaves para multiserviços</div>
     <div id="apikey-status-box" style="display:none;"></div>
-    <div class="apikey-row">
-      <input class="apikey-inp" id="inp-apikey" type="password" placeholder="AIza..." autocomplete="off" oninput="onApiKeyInput()">
+    <div id="cerebras-status-box" style="display:none;margin-top:6px;"></div>
+    <div id="cloudflare-status-box" style="display:none;margin-top:6px;"></div>
+    <div class="apikey-row" style="flex-direction:column;gap:8px;">
+      <input class="apikey-inp" id="inp-apikey" type="password" placeholder="Chave Gemini (AIza...)" autocomplete="off" oninput="onApiKeyInput()">
+      <input class="apikey-inp" id="inp-cerebras-key" type="password" placeholder="Chave Cerebras (opcional)" autocomplete="off" oninput="onCerebrasKeyInput()">
+      <input class="apikey-inp" id="inp-cloudflare-key" type="password" placeholder="Cloudflare Account ID (opcional)" autocomplete="off" oninput="onCloudflareKeyInput()">
     </div>
     <div class="apikey-hint">
-      ⚖️ O <strong style="color:var(--gold2)">Juiz IA</strong> roda com Google Gemini — <strong style="color:var(--green2)">100% grátis</strong>.<br><br>
-      Pegue sua chave em:<br>
-      <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com → Get API Key →</a><br><br>
-      Cole aqui, salva automático. Cada pessoa faz isso uma vez no próprio dispositivo.
+      ⚖️ O <strong style="color:var(--gold2)">Juiz IA</strong> tenta Gemini primeiro. Se a quota zerar, usa <strong style="color:var(--green2)">Cerebras</strong> e depois Cloudflare como fallback antes de cair no juiz local.<br><br>
+      Cole a chave Gemini para o melhor resultado; as chaves Cerebras e Cloudflare são opcionais para aumentar a disponibilidade.
     </div>
   </div>
 
@@ -959,9 +962,15 @@ const firebaseConfig = {
 window.firebaseConfig = firebaseConfig;
 
 // ═══════════════════════════════════════════════════════
-// CLAUDE API — Juiz + Assistente (sempre ativo, sem chave)
+// API Keys — Gemini + Cerebras + Cloudflare
 // ═══════════════════════════════════════════════════════
-let geminiKey = localStorage.getItem('tribunal_gemini_key') || '';
+// Defina aqui as chaves padrão se quiser ativar automaticamente sem digitar na UI.
+window.DEFAULT_GEMINI_KEY = ''; // ex: 'AIza...'
+window.DEFAULT_CEREBRAS_KEY = '';
+window.DEFAULT_CLOUDFLARE_KEY = ''; // ex: 'ACCOUNT_ID:API_TOKEN' ou apenas token
+let geminiKey = localStorage.getItem('tribunal_gemini_key') || window.DEFAULT_GEMINI_KEY || '';
+let cerebrasKey = localStorage.getItem('tribunal_cerebras_key') || window.DEFAULT_CEREBRAS_KEY || '';
+let cloudflareKey = localStorage.getItem('tribunal_cloudflare_key') || window.DEFAULT_CLOUDFLARE_KEY || '';
 
 // Histórico do Juiz para conversa contínua e inteligente
 let judgeHistory = [];
@@ -974,7 +983,7 @@ function toGeminiHistory(messages) {
   }));
 }
 
-async function callClaude(systemPrompt, messages, maxTokens=1000) {
+async function callGemini(systemPrompt, messages, maxTokens=1000) {
   if (!geminiKey) throw new Error('Chave Gemini não configurada. Cole sua chave no lobby.');
   const history = messages.slice(0, -1);
   const lastMsg = messages[messages.length - 1];
@@ -994,9 +1003,42 @@ async function callClaude(systemPrompt, messages, maxTokens=1000) {
   return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 
+async function callCerebras(systemPrompt, userPrompt, maxTokens=1000, history=[]) {
+  const prompt = [
+    { role:'system', content: systemPrompt },
+    ...history,
+    { role:'user', content: userPrompt }
+  ].map(m => `${m.role}: ${m.content || ''}`).join('\n');
+  const url = 'https://api.cerebras.net/v1/generate';
+  const headers = { 'Content-Type': 'application/json' };
+  if (cerebrasKey) headers.Authorization = `Bearer ${cerebrasKey}`;
+  const body = { model:'llama-3.3', input: prompt, max_output_tokens:maxTokens, temperature:0.8, top_p:0.95 };
+  const resp = await fetch(url, { method:'POST', headers, body:JSON.stringify(body) });
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data?.error?.message || 'cerebras_error');
+  if (typeof data.text === 'string') return data.text;
+  if (Array.isArray(data?.results)) return data.results.map(r=>r.output || '').join('\n');
+  return JSON.stringify(data);
+}
+
+async function callLocalAI(systemPrompt, userPrompt, maxTokens=800, history=[]) {
+  if (!window.localJudgeAnalyze) throw new Error('localJudge unavailable');
+  const caseObj = { titulo:'Assistente IA', context_juiz: userPrompt };
+  const msgs = [...history, { sender:'Usuário', role:'user', text:userPrompt }];
+  const local = window.LocalJudge.generateIntervention(caseObj, msgs);
+  return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
+}
+
 async function callAI(systemPrompt, userPrompt, maxTokens=800, history=[]) {
-  const msgs = [...history, { role:'user', content: userPrompt }];
-  return await callClaude(systemPrompt, msgs, maxTokens);
+  try {
+    if (geminiKey) return await callGemini(systemPrompt, [...history, { role:'user', content:userPrompt }], maxTokens);
+  } catch(e){ console.warn('Gemini falhou, tentando Cerebras', e.message||e); }
+
+  try {
+    return await callCerebras(systemPrompt, userPrompt, maxTokens, history);
+  } catch(e){ console.warn('Cerebras falhou, tentando fallback local', e.message||e); }
+
+  return await callLocalAI(systemPrompt, userPrompt, maxTokens, history);
 }
 
 function onApiKeyInput() {
@@ -1016,15 +1058,66 @@ function onApiKeyInput() {
   }
 }
 
-function initApiKeyUI() {
-  const box = document.getElementById('apikey-status-box');
-  if (geminiKey && geminiKey.startsWith('AIza')) {
+function onCerebrasKeyInput() {
+  const val = document.getElementById('inp-cerebras-key').value.trim();
+  cerebrasKey = val;
+  const box = document.getElementById('cerebras-status-box');
+  if (val.length > 10) {
+    localStorage.setItem('tribunal_cerebras_key', val);
     box.style.display = 'block';
-    box.innerHTML = '<div class="apikey-status ok">✓ Chave Gemini ativa — Juiz pronto!</div>';
+    box.innerHTML = '<div class="apikey-status ok">✓ Chave Cerebras salva como fallback</div>';
+  } else if (val.length > 0) {
+    localStorage.removeItem('tribunal_cerebras_key');
+    box.style.display = 'block';
+    box.innerHTML = '<div class="apikey-status no">⚠ Chave Cerebras inválida ou incompleta</div>';
+  } else {
+    localStorage.removeItem('tribunal_cerebras_key');
+    box.style.display = 'none';
+  }
+}
+
+function onCloudflareKeyInput() {
+  const val = document.getElementById('inp-cloudflare-key').value.trim();
+  const box = document.getElementById('cloudflare-status-box');
+  if (val.length > 10) {
+    localStorage.setItem('tribunal_cloudflare_key', val);
+    box.style.display = 'block';
+    box.innerHTML = '<div class="apikey-status ok">✓ Cloudflare ativada como fallback</div>';
+  } else if (val.length > 0) {
+    localStorage.removeItem('tribunal_cloudflare_key');
+    box.style.display = 'block';
+    box.innerHTML = '<div class="apikey-status no">⚠ Cloudflare inválida ou incompleta</div>';
+  } else {
+    localStorage.removeItem('tribunal_cloudflare_key');
+    box.style.display = 'none';
+  }
+}
+
+function initApiKeyUI() {
+  const gemBox = document.getElementById('apikey-status-box');
+  const cerBox = document.getElementById('cerebras-status-box');
+  const cfBox = document.getElementById('cloudflare-status-box');
+  if (geminiKey && geminiKey.startsWith('AIza')) {
+    gemBox.style.display = 'block';
+    gemBox.innerHTML = '<div class="apikey-status ok">✓ Chave Gemini ativa — Juiz pronto!</div>';
     const inp = document.getElementById('inp-apikey'); if (inp) inp.value = geminiKey;
   } else {
-    box.style.display = 'block';
-    box.innerHTML = '<div class="apikey-status no">⚠ Cole sua chave Gemini para ativar o Juiz IA</div>';
+    gemBox.style.display = 'block';
+    gemBox.innerHTML = '<div class="apikey-status no">⚠ Cole sua chave Gemini para ativar o Juiz IA</div>';
+  }
+  if (cerebrasKey) {
+    cerBox.style.display = 'block';
+    cerBox.innerHTML = '<div class="apikey-status ok">✓ Chave Cerebras ativa — fallback disponível</div>';
+    const inp = document.getElementById('inp-cerebras-key'); if (inp) inp.value = cerebrasKey;
+  } else {
+    cerBox.style.display = 'none';
+  }
+  if (cloudflareKey) {
+    cfBox.style.display = 'block';
+    cfBox.innerHTML = '<div class="apikey-status ok">✓ Cloudflare ativa como fallback</div>';
+    const inp = document.getElementById('inp-cloudflare-key'); if (inp) inp.value = cloudflareKey;
+  } else {
+    cfBox.style.display = 'none';
   }
 }
 
@@ -1033,16 +1126,7 @@ function clearApiKey() {
   const inp = document.getElementById('inp-apikey'); if (inp) inp.value = '';
 }
 
-// Gemini fallback (não usada mais por padrão)
-async function callGemini(systemPrompt, userPrompt, maxTokens) {
-  if (!geminiKey?.startsWith('AIza')) throw new Error('Sem chave Gemini');
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
-  const body = { system_instruction:{parts:[{text:systemPrompt}]}, contents:[{role:'user',parts:[{text:userPrompt}]}], generationConfig:{maxOutputTokens:maxTokens||1200,temperature:0.72} };
-  const resp = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const data = await resp.json();
-  if (data.error) throw new Error(data.error.message);
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-}
+document.addEventListener('DOMContentLoaded', initApiKeyUI);
 
 // ═══════════════════════════════════════════════════════
 // DADOS DOS CASOS — 8 casos (5 originais + 3 novos complexos)
