@@ -6,23 +6,42 @@ function getCerebrasKey(){ return localStorage.getItem('tribunal_cerebras_key') 
 function getCloudflareKey(){ return localStorage.getItem('tribunal_cloudflare_key') || window.DEFAULT_CLOUDFLARE_KEY || ''; }
 
 async function tryFallbackAIs(caseObj, messages){
-  // preferir o juiz local primeiro (evita chamadas ao proxy que podem falhar/estar em 503)
-  try{
-    if(typeof LocalJudge !== 'undefined' && LocalJudge && LocalJudge.generateIntervention){
-      const local = LocalJudge.generateIntervention(caseObj, messages);
-      if(local && local.text) return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
-    }
-  }catch(e){ console.warn('local judge failed', e.message||e); }
-
-  // tentar proxy remoto como fallback
+  // 1. proxy Vercel primeiro
   try{
     const txt = await askProxy(caseObj, messages);
     if(txt) return txt;
   }catch(e){ console.warn('proxy failed', e.message||e); }
 
-  // último recurso: juiz local gerando resultado mais uma vez
-  const local2 = LocalJudge.generateIntervention(caseObj, messages);
-  return `${local2.text}\n\n(placar simulado: ${local2.score.acusacao}×${local2.score.defesa})`;
+  // 2. Gemini direto
+  const geminiKey = getKey();
+  if(geminiKey){
+    try{
+      const txt = await askGeminiDirect(caseObj, messages, geminiKey);
+      if(txt) return txt;
+    }catch(e){ console.warn('gemini direct failed', e.message||e); }
+  }
+
+  // 3. Cerebras direto
+  const cerebrasKey = getCerebrasKey();
+  if(cerebrasKey){
+    try{
+      const txt = await askCerebrasDirect(caseObj, messages, cerebrasKey);
+      if(txt) return txt;
+    }catch(e){ console.warn('cerebras direct failed', e.message||e); }
+  }
+
+  // 4. Cloudflare direto
+  const cloudflareKey = getCloudflareKey();
+  if(cloudflareKey){
+    try{
+      const txt = await askCloudflareDirect(caseObj, messages, cloudflareKey);
+      if(txt) return txt;
+    }catch(e){ console.warn('cloudflare direct failed', e.message||e); }
+  }
+
+  // 5. fallback local (último recurso)
+  const local = LocalJudge.generateIntervention(caseObj, messages);
+  return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
 }
 
 export async function askJudge(caseObj, messages){

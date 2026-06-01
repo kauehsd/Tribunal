@@ -398,35 +398,45 @@ async function requestJudge(){
   // mostrar typing indicator
   const typingEl = $('typing-ind'); if(typingEl){ $('typing-who').textContent='Juiz'; typingEl.classList.add('show'); }
   try{
-    // Prefer local judge if available (free, sem chaves)
-    if(window.localJudgeAnalyze){
-      // mark judge pending so user replies trigger re-run
-      if(roomRef) await roomRef.child('judge_pending').set(true);
-      // stream incremental updates and obtain final in one call
+    // incluir pedidos de pena no contexto
+    let pedidosCtx = '';
+    if(roomRef){
+      const pedSnap = await roomRef.child('pedidos').once('value');
+      const ped = pedSnap.val() || {};
+      if(ped.acu || ped.def) pedidosCtx = `\n\nPEDIDOS DE PENA — Acusação: ${ped.acu||'não informado'} / Defesa: ${ped.def||'não informado'}`;
+    }
+    const caseObjComPedidos = { ...caseObj, context_juiz: (caseObj.context_juiz||'') + pedidosCtx };
+
+    if(roomRef) await roomRef.child('judge_pending').set(true);
+
+    // 1. tenta IA inteligente via proxy/askJudge
+    if(window.askJudge){
+      const answer = await window.askJudge(caseObjComPedidos, msgs);
+      if(roomRef){
+        await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' });
+        await roomRef.child('verdict').set({ text: answer, ts: Date.now() });
+      } else {
+        appendChatMessage({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' });
+      }
+    } else if(window.localJudgeAnalyze){
+      // 2. fallback local só se askJudge não existir
       const final = await window.localJudgeAnalyze(msgs, caseObj, async (update)=>{
         try{
           const text = update?.text || '';
           const meta = update?.meta || {};
-          // push partial judge messages so both clients vejam progresso
           if(roomRef){
             await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge', _stage:update.stage, _meta:meta });
-            // if perguntas, persist for UI
             if(update.stage === 'questions'){
               await roomRef.child('verdict_questions').set({ perguntas_acu: meta.perguntas_acu || [], perguntas_def: meta.perguntas_def || [] });
             }
           } else appendChatMessage({ sender:'Juiz', role:'juiz', text, ts:Date.now(), type:'judge' });
         }catch(err){ console.warn('localJudge push failed', err); }
       });
-      // after streaming, set latest verdict snapshot and clear pending
       if(roomRef) await roomRef.child('verdict').set({ text: final.text, ts: Date.now(), verdict: final.verdict });
-      if(roomRef) await roomRef.child('judge_pending').set(false);
-      const typingEl2 = $('typing-ind'); if(typingEl2) typingEl2.classList.remove('show');
-    } else {
-      // fallback to remote askJudge (ai-bridge)
-      const answer = await window.askJudge(caseObj, msgs);
-      if(roomRef){ await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' }); await roomRef.child('verdict').set({ text: answer, ts: Date.now() }); }
-      else { appendChatMessage({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' }); }
     }
+
+    if(roomRef) await roomRef.child('judge_pending').set(false);
+    const typingEl2 = $('typing-ind'); if(typingEl2) typingEl2.classList.remove('show');
   }catch(e){
     console.error('judge request failed', e);
     const typingEl3 = $('typing-ind'); if(typingEl3) typingEl3.classList.remove('show');

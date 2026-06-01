@@ -1240,5 +1240,18 @@ if (typeof window !== 'undefined') {
 <script type="module" src="./judge_local.js"></script>
 <script type="module" src="./main.js"></script>
 
+<script>
+// garante que funções do módulo main.js estejam prontas antes de qualquer clique
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btn-send');
+  const inp = document.getElementById('chat-inp');
+  if(btn) btn.onclick = () => window.sendMessage && window.sendMessage();
+  if(inp){
+    inp.oninput = () => window.onChatInput && window.onChatInput();
+    inp.onkeydown = (e) => window.onChatKey && window.onChatKey(e);
+  }
+});
+</script>
+
 </body>
 </html>
