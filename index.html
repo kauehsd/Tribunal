@@ -1241,16 +1241,37 @@ if (typeof window !== 'undefined') {
 <script type="module" src="./main.js"></script>
 
 <script>
-// garante que funções do módulo main.js estejam prontas antes de qualquer clique
-document.addEventListener('DOMContentLoaded', () => {
-  const btn = document.getElementById('btn-send');
-  const inp = document.getElementById('chat-inp');
-  if(btn) btn.onclick = () => window.sendMessage && window.sendMessage();
-  if(inp){
-    inp.oninput = () => window.onChatInput && window.onChatInput();
-    inp.onkeydown = (e) => window.onChatKey && window.onChatKey(e);
+// Aguarda módulos ES carregarem antes de vincular eventos
+function bindWhenReady(id, event, fn, tries) {
+  tries = tries || 0;
+  const el = document.getElementById(id);
+  if (!el) return;
+  el[event] = fn;
+  if (tries < 30 && typeof fn() === 'undefined' && !window._modulesReady) {
+    // já vinculou, mas verifica se window.sendMessage existe
   }
-});
+}
+
+// Polling simples: tenta vincular a cada 100ms até as funções existirem
+const _bindInterval = setInterval(() => {
+  if (window.sendMessage && window.onChatKey) {
+    const btn = document.getElementById('btn-send');
+    const inp = document.getElementById('chat-inp');
+    const iaBtn = document.getElementById('ia-send-btn');
+    const iaInp = document.getElementById('ia-inp');
+    if (btn) btn.onclick = () => window.sendMessage();
+    if (inp) {
+      inp.oninput = () => window.onChatInput && window.onChatInput();
+      inp.onkeydown = (e) => window.onChatKey(e);
+    }
+    if (iaBtn) iaBtn.onclick = () => window.sendIaMsg && window.sendIaMsg();
+    if (iaInp) {
+      iaInp.oninput = () => window.onIaInpInput && window.onIaInpInput();
+      iaInp.onkeydown = (e) => window.onIaInpKey && window.onIaInpKey(e);
+    }
+    clearInterval(_bindInterval);
+  }
+}, 100);
 </script>
 
 </body>
