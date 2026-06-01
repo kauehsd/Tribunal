@@ -6,15 +6,23 @@ function getCerebrasKey(){ return localStorage.getItem('tribunal_cerebras_key') 
 function getCloudflareKey(){ return localStorage.getItem('tribunal_cloudflare_key') || window.DEFAULT_CLOUDFLARE_KEY || ''; }
 
 async function tryFallbackAIs(caseObj, messages){
-  // proxy first (Vercel with env var fallback chain: Gemini → Cerebras → Cloudflare)
+  // preferir o juiz local primeiro (evita chamadas ao proxy que podem falhar/estar em 503)
+  try{
+    if(typeof LocalJudge !== 'undefined' && LocalJudge && LocalJudge.generateIntervention){
+      const local = LocalJudge.generateIntervention(caseObj, messages);
+      if(local && local.text) return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
+    }
+  }catch(e){ console.warn('local judge failed', e.message||e); }
+
+  // tentar proxy remoto como fallback
   try{
     const txt = await askProxy(caseObj, messages);
     if(txt) return txt;
   }catch(e){ console.warn('proxy failed', e.message||e); }
 
-  // fallback local (no browser API calls to avoid quota/auth issues)
-  const local = LocalJudge.generateIntervention(caseObj, messages);
-  return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
+  // último recurso: juiz local gerando resultado mais uma vez
+  const local2 = LocalJudge.generateIntervention(caseObj, messages);
+  return `${local2.text}\n\n(placar simulado: ${local2.score.acusacao}×${local2.score.defesa})`;
 }
 
 export async function askJudge(caseObj, messages){

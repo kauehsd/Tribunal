@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Tribunal do Casal ⚖️ v7</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=IBM+Plex+Mono:wght@300;400;500&family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -606,22 +606,8 @@ input:disabled{cursor:not-allowed;opacity:.5;}
   <h1 class="lobby-title">Tribunal<br><em>do Casal</em></h1>
   <p class="lobby-sub">Debata casos reais com seu parceiro.<br>O Juiz IA lê tudo e dá o veredito.</p>
 
-  <!-- API KEY -->
-  <div class="lobby-card" style="max-width:480px;">
-    <div class="lc-title">// juiz ia — chaves para multiserviços</div>
-    <div id="apikey-status-box" style="display:none;"></div>
-    <div id="cerebras-status-box" style="display:none;margin-top:6px;"></div>
-    <div id="cloudflare-status-box" style="display:none;margin-top:6px;"></div>
-    <div class="apikey-row" style="flex-direction:column;gap:8px;">
-      <input class="apikey-inp" id="inp-apikey" type="password" placeholder="Chave Gemini (AIza...)" autocomplete="off" oninput="onApiKeyInput()">
-      <input class="apikey-inp" id="inp-cerebras-key" type="password" placeholder="Chave Cerebras (opcional)" autocomplete="off" oninput="onCerebrasKeyInput()">
-      <input class="apikey-inp" id="inp-cloudflare-key" type="password" placeholder="Cloudflare Account ID (opcional)" autocomplete="off" oninput="onCloudflareKeyInput()">
-    </div>
-    <div class="apikey-hint">
-      ⚖️ O <strong style="color:var(--gold2)">Juiz IA</strong> tenta Gemini primeiro. Se a quota zerar, usa <strong style="color:var(--green2)">Cerebras</strong> e depois Cloudflare como fallback antes de cair no juiz local.<br><br>
-      Cole a chave Gemini para o melhor resultado; as chaves Cerebras e Cloudflare são opcionais para aumentar a disponibilidade.
-    </div>
-  </div>
+  <!-- API KEY (removida para uso local) -->
+  <!-- As chaves agora são gerenciadas no servidor. O app usará o juiz local quando não houver backend disponível. -->
 
   <!-- CRIAR SALA -->
   <div class="lobby-card" id="card-create">
