@@ -965,9 +965,10 @@ window.firebaseConfig = firebaseConfig;
 // API Keys — Gemini + Cerebras + Cloudflare
 // ═══════════════════════════════════════════════════════
 // Defina aqui as chaves padrão se quiser ativar automaticamente sem digitar na UI.
-window.DEFAULT_GEMINI_KEY = ''; // ex: 'AIza...'
+// NÃO deixe chaves reais comitadas no repositório público.
+window.DEFAULT_GEMINI_KEY = '';
 window.DEFAULT_CEREBRAS_KEY = '';
-window.DEFAULT_CLOUDFLARE_KEY = ''; // ex: 'ACCOUNT_ID:API_TOKEN' ou apenas token
+window.DEFAULT_CLOUDFLARE_KEY = '';
 let geminiKey = localStorage.getItem('tribunal_gemini_key') || window.DEFAULT_GEMINI_KEY || '';
 let cerebrasKey = localStorage.getItem('tribunal_cerebras_key') || window.DEFAULT_CEREBRAS_KEY || '';
 let cloudflareKey = localStorage.getItem('tribunal_cloudflare_key') || window.DEFAULT_CLOUDFLARE_KEY || '';

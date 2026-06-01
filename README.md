@@ -43,6 +43,8 @@ Isso permite que o Juiz seja ativado automaticamente no carregamento, sem precis
 
 Se nenhuma chave estiver disponível, o código ainda funciona com `judge_local.js`.
 
+> Importante: por segurança, não comite chaves reais no GitHub. Use o campo de configuração do app ou variáveis locais em vez de deixar credenciais embutidas no repositório.
+
 ## Próximos passos sugeridos
 
 - Integrar Firebase/Supabase para multiplayer (salas, chat em tempo real)
