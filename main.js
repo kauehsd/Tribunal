@@ -192,8 +192,14 @@ function initUI(){
   const sendBtn = $('btn-send'); if(sendBtn) sendBtn.addEventListener('click', sendMessage);
   const judgeBtn = $('btn-judge'); if(judgeBtn) judgeBtn.addEventListener('click', requestJudge);
   const iaSend = $('ia-send-btn'); if(iaSend) iaSend.addEventListener('click', sendIaMsg);
-  const iaInp = $('ia-inp'); if(iaInp) iaInp.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendIaMsg(); } });
-  const chatInp = $('chat-inp'); if(chatInp) chatInp.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); } });
+  const iaInp = $('ia-inp'); if(iaInp){ iaInp.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendIaMsg(); } }); iaInp.addEventListener('input', onIaInpInput); }
+  const chatInp = $('chat-inp'); if(chatInp){ chatInp.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); } }); chatInp.addEventListener('input', onChatInput); }
+
+  // notas panel bindings (buttons had inline handlers removed)
+  document.querySelectorAll('.notas-tab').forEach((b,i)=>{ b.addEventListener('click', ()=> showNotasTab(i===0 ? 'pad' : 'ia')); });
+  const notasTa = $('notas-ta'); if(notasTa) notasTa.addEventListener('input', onNotasInput);
+  const notasClear = document.querySelector('.notas-clear'); if(notasClear) notasClear.addEventListener('click', clearNotas);
+  const replyClose = document.querySelector('.reply-banner-close'); if(replyClose) replyClose.addEventListener('click', clearReply);
 
   // populate cases list
   const scroll = $('case-scroll');
@@ -201,6 +207,11 @@ function initUI(){
     scroll.innerHTML = window.CASES.map((c,i)=>`<div class="case-chip ${i===0?'active':''}" data-idx="${i}">${c.id} · ${c.nome}</div>`).join('');
     scroll.querySelectorAll('.case-chip').forEach(el=>el.addEventListener('click', (e)=>{ selectCase(Number(el.dataset.idx)); }));
   }
+  // IA quick buttons (populados no HTML via data-prompt)
+  document.querySelectorAll('.ia-quick-btn').forEach(btn=>{
+    const p = btn.dataset.prompt || btn.textContent || '';
+    btn.addEventListener('click', ()=> iaQuickAsk(p));
+  });
 }
 
 function initLobby(){ if(!initFirebase()){ alert('Erro ao conectar ao Firebase!'); return; } initUI(); initApiKeyUI?.(); }

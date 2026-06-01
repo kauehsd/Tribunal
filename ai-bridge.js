@@ -59,14 +59,11 @@ export async function askAI(systemPrompt, userPrompt, maxTokens=800, history=[])
   return await tryFallbackAIs(caseObj, messages);
 }
 
-// Backwards-compatible global bindings used by inline scripts
 if(typeof window !== 'undefined'){
   window.askJudge = askJudge;
   window.AIJudge = { ask: askJudge };
-  // override older helpers if present
-  window.callGemini = async function(system, userPrompt, maxTokens){
-    const fallbackCase = { titulo: 'Caso genérico', context_juiz: userPrompt };
-    return await askJudge(fallbackCase, [{ sender: 'Usuário', role: 'user', text: userPrompt }]);
-  };
   window.callAI = askAI;
+  window.callGemini = async function(system, userPrompt){
+    return await askJudge({ titulo:'Caso genérico', context_juiz:userPrompt }, [{ sender:'Usuário', role:'user', text:userPrompt }]);
+  };
 }

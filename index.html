@@ -721,13 +721,13 @@ input:disabled{cursor:not-allowed;opacity:.5;}
         <div class="reply-banner" id="reply-banner">
           <span style="font-size:10px;">↩️</span>
           <span class="reply-banner-text" id="reply-banner-text"></span>
-          <button class="reply-banner-close" onclick="clearReply()">✕</button>
+          <button class="reply-banner-close">✕</button>
         </div>
         <div class="art-quick-row" id="art-quick-row"></div>
         <div class="chat-row">
-          <textarea class="chat-inp" id="chat-inp" placeholder="Seu argumento..." rows="1" oninput="onChatInput()" onkeydown="onChatKey(event)"></textarea>
-          <button class="chat-send judge" id="btn-judge" onclick="requestJudge()" title="Chamar o Juiz">⚖️</button>
-          <button class="chat-send" id="btn-send" onclick="sendMessage()">ENVIAR</button>
+          <textarea class="chat-inp" id="chat-inp" placeholder="Seu argumento..." rows="1"></textarea>
+          <button class="chat-send judge" id="btn-judge" title="Chamar o Juiz">⚖️</button>
+          <button class="chat-send" id="btn-send">ENVIAR</button>
         </div>
         <div style="text-align:center;padding:4px 0 2px;font-family:var(--mono);font-size:9px;color:var(--text3);">⚖️ clique para chamar o juiz · ele também responde automaticamente</div>
       </div>
@@ -832,8 +832,8 @@ input:disabled{cursor:not-allowed;opacity:.5;}
     <div class="tab-panel" id="tab-notas">
       <div class="notas-wrap">
         <div class="notas-tabs">
-          <button class="notas-tab active" onclick="showNotasTab('pad')">📝 ANOTAÇÕES</button>
-          <button class="notas-tab" onclick="showNotasTab('ia')">🤖 ASSISTENTE IA</button>
+          <button class="notas-tab active">📝 ANOTAÇÕES</button>
+          <button class="notas-tab">🤖 ASSISTENTE IA</button>
         </div>
         <!-- Pad de notas -->
         <div class="notas-panel active" id="notas-panel-pad">
@@ -842,11 +842,11 @@ input:disabled{cursor:not-allowed;opacity:.5;}
               <span class="notas-title">bloco de notas</span>
               <span class="notas-badge">PRIVADO — só você vê</span>
             </div>
-            <textarea class="notas-ta" id="notas-ta" placeholder="Anote seus argumentos, estratégias, pontos a explorar...\n\n💡 Use o 🤖 Assistente IA ao lado para pedir dicas de estratégia — privado também!" oninput="onNotasInput()"></textarea>
+            <textarea class="notas-ta" id="notas-ta" placeholder="Anote seus argumentos, estratégias, pontos a explorar...\n\n💡 Use o 🤖 Assistente IA ao lado para pedir dicas de estratégia — privado também!"></textarea>
             <div class="notas-footer">
               <span class="notas-chars" id="notas-chars">0 caracteres</span>
               <span class="notas-saved" id="notas-saved">✓ salvo</span>
-              <button class="notas-clear" onclick="clearNotas()">✕ limpar</button>
+              <button class="notas-clear">✕ limpar</button>
             </div>
           </div>
         </div>
@@ -866,17 +866,17 @@ input:disabled{cursor:not-allowed;opacity:.5;}
               Cole a chave no lobby para ativar.
             </div>
             <div class="ia-quick-btns" id="ia-quick-btns">
-              <button class="ia-quick-btn" onclick="iaQuickAsk('Quais são os pontos mais fortes da minha posição neste caso?')">💪 Meus pontos fortes</button>
-              <button class="ia-quick-btn" onclick="iaQuickAsk('Qual argumento devo usar primeiro para causar impacto?')">🎯 Argumento de impacto</button>
-              <button class="ia-quick-btn" onclick="iaQuickAsk('Quais as vulnerabilidades da posição adversária?')">🔍 Fraquezas do adversário</button>
-              <button class="ia-quick-btn" onclick="iaQuickAsk('Quais artigos do Código Penal devo invocar e como?')">📖 Artigos para usar</button>
-              <button class="ia-quick-btn" onclick="iaQuickAsk('Me dê uma linha de raciocínio jurídico completa para minha posição.')">🧠 Linha de raciocínio</button>
-              <button class="ia-quick-btn" onclick="iaQuickAsk('Como rebater o argumento mais forte da parte contrária?')">🛡️ Como rebater</button>
+              <button class="ia-quick-btn" data-prompt="Quais são os pontos mais fortes da minha posição neste caso?">💪 Meus pontos fortes</button>
+              <button class="ia-quick-btn" data-prompt="Qual argumento devo usar primeiro para causar impacto?">🎯 Argumento de impacto</button>
+              <button class="ia-quick-btn" data-prompt="Quais as vulnerabilidades da posição adversária?">🔍 Fraquezas do adversário</button>
+              <button class="ia-quick-btn" data-prompt="Quais artigos do Código Penal devo invocar e como?">📖 Artigos para usar</button>
+              <button class="ia-quick-btn" data-prompt="Me dê uma linha de raciocínio jurídico completa para minha posição.">🧠 Linha de raciocínio</button>
+              <button class="ia-quick-btn" data-prompt="Como rebater o argumento mais forte da parte contrária?">🛡️ Como rebater</button>
             </div>
             <div class="ia-chat-msgs" id="ia-chat-msgs"></div>
             <div class="ia-chat-input-row">
-              <textarea class="ia-inp" id="ia-inp" placeholder="Pergunte sobre estratégia, artigos, argumentos..." rows="1" oninput="onIaInpInput()" onkeydown="onIaInpKey(event)"></textarea>
-              <button class="ia-send" id="ia-send-btn" onclick="sendIaMsg()">ASK</button>
+              <textarea class="ia-inp" id="ia-inp" placeholder="Pergunte sobre estratégia, artigos, argumentos..." rows="1"></textarea>
+              <button type="button" class="ia-send" id="ia-send-btn">ASK</button>
             </div>
           </div>
         </div>
@@ -1240,39 +1240,7 @@ if (typeof window !== 'undefined') {
 <script type="module" src="./judge_local.js"></script>
 <script type="module" src="./main.js"></script>
 
-<script>
-// Aguarda módulos ES carregarem antes de vincular eventos
-function bindWhenReady(id, event, fn, tries) {
-  tries = tries || 0;
-  const el = document.getElementById(id);
-  if (!el) return;
-  el[event] = fn;
-  if (tries < 30 && typeof fn() === 'undefined' && !window._modulesReady) {
-    // já vinculou, mas verifica se window.sendMessage existe
-  }
-}
-
-// Polling simples: tenta vincular a cada 100ms até as funções existirem
-const _bindInterval = setInterval(() => {
-  if (window.sendMessage && window.onChatKey) {
-    const btn = document.getElementById('btn-send');
-    const inp = document.getElementById('chat-inp');
-    const iaBtn = document.getElementById('ia-send-btn');
-    const iaInp = document.getElementById('ia-inp');
-    if (btn) btn.onclick = () => window.sendMessage();
-    if (inp) {
-      inp.oninput = () => window.onChatInput && window.onChatInput();
-      inp.onkeydown = (e) => window.onChatKey(e);
-    }
-    if (iaBtn) iaBtn.onclick = () => window.sendIaMsg && window.sendIaMsg();
-    if (iaInp) {
-      iaInp.oninput = () => window.onIaInpInput && window.onIaInpInput();
-      iaInp.onkeydown = (e) => window.onIaInpKey && window.onIaInpKey(e);
-    }
-    clearInterval(_bindInterval);
-  }
-}, 100);
-</script>
+<!-- Removed legacy polling binder; initUI in main.js performs bindings via addEventListener -->
 
 </body>
 </html>
