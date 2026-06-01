@@ -565,7 +565,7 @@ function clearNotas(){ const ta = $('notas-ta'); if(ta) ta.value=''; if(roomRef)
 function iaQuickAsk(q){ const ta = $('ia-inp'); if(!ta) return; ta.value = q; sendIaMsg(); }
 
 // Expose simple handlers globally
-window.backToLobby = backToLobby; window.showTab = showTab; window.onChatInput = onChatInput; window.onChatKey = onChatKey; window.onIaInpInput = onIaInpInput; window.onIaInpKey = onIaInpKey; window.onNotasInput = onNotasInput; window.clearNotas = clearNotas; window.iaQuickAsk = iaQuickAsk; window.calcPena = calcPena; window.toggleCalcFactor = toggleCalcFactor;
+window.backToLobby = backToLobby; window.showTab = showTab; window.onChatInput = onChatInput; window.onChatKey = onChatKey; window.onIaInpInput = onIaInpInput; window.onIaInpKey = onIaInpKey; window.onNotasInput = onNotasInput; window.clearNotas = clearNotas; window.iaQuickAsk = iaQuickAsk; window.sendIaMsg = sendIaMsg; window.calcPena = calcPena; window.toggleCalcFactor = toggleCalcFactor;
 
 function showNotasTab(tab){ document.getElementById('notas-panel-pad').classList.toggle('active', tab==='pad'); document.getElementById('notas-panel-ia').classList.toggle('active', tab==='ia'); document.querySelectorAll('.notas-tab').forEach(b=>b.classList.toggle('active', b.textContent.includes(tab==='pad'?'ANOTAÇÕES':'ASSISTENTE'))); }
 
