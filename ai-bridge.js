@@ -6,38 +6,13 @@ function getCerebrasKey(){ return localStorage.getItem('tribunal_cerebras_key') 
 function getCloudflareKey(){ return localStorage.getItem('tribunal_cloudflare_key') || window.DEFAULT_CLOUDFLARE_KEY || ''; }
 
 async function tryFallbackAIs(caseObj, messages){
-  // proxy first
+  // proxy first (Vercel with env var fallback chain: Gemini → Cerebras → Cloudflare)
   try{
     const txt = await askProxy(caseObj, messages);
     if(txt) return txt;
   }catch(e){ console.warn('proxy failed', e.message||e); }
 
-  // Gemini
-  const geminiKey = getKey();
-  if(geminiKey){
-    try{
-      const txt = await askGeminiDirect(caseObj, messages, geminiKey);
-      if(txt) return txt;
-    }catch(e){ console.warn('gemini direct failed', e.message||e); }
-  }
-
-  // Cerebras
-  const cerebrasKey = getCerebrasKey();
-  try{
-    const txt = await askCerebrasDirect(caseObj, messages, cerebrasKey);
-    if(txt) return txt;
-  }catch(e){ console.warn('cerebras direct failed', e.message||e); }
-
-  // Cloudflare AI if configured
-  const cloudflareKey = getCloudflareKey();
-  if(cloudflareKey){
-    try{
-      const txt = await askCloudflareDirect(caseObj, messages, cloudflareKey);
-      if(txt) return txt;
-    }catch(e){ console.warn('cloudflare direct failed', e.message||e); }
-  }
-
-  // fallback local
+  // fallback local (no browser API calls to avoid quota/auth issues)
   const local = LocalJudge.generateIntervention(caseObj, messages);
   return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
 }
