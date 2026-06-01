@@ -53,14 +53,16 @@ export async function askGeminiDirect(caseObj, messages, key){
 }
 
 export async function askCerebrasDirect(caseObj, messages, key){
-  const url = 'https://api.cerebras.net/v1/generate';
+  const url = 'https://api.cerebras.ai/v1/chat/completions';
   const headers = { 'Content-Type':'application/json' };
   if(key) headers.Authorization = `Bearer ${key}`;
-  const body = { model:'llama-3.3', input: buildJudgePrompt(caseObj, messages), max_output_tokens:800, temperature:0.8, top_p:0.95 };
+  const systemPrompt = 'Você é Dr. Augusto Melo, Juiz de direito experiente em direito penal. Analise o caso de forma objetiva e construtiva.';
+  const debate = buildJudgePrompt(caseObj, messages);
+  const body = { model: 'llama-3.3-70b', messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: debate }], max_tokens: 800, temperature: 0.8 };
   const resp = await fetch(url, { method:'POST', headers, body:JSON.stringify(body) });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.error?.message || 'cerebras_error');
-  return parseAiResponse(data);
+  return parseAiResponse(data?.choices?.[0]?.message?.content || '');
 }
 
 async function resolveCloudflareAccountId(apiToken){
