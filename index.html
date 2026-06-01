@@ -984,26 +984,6 @@ function toGeminiHistory(messages) {
   }));
 }
 
-async function callGemini(systemPrompt, messages, maxTokens=1000) {
-  if (!geminiKey) throw new Error('Chave Gemini não configurada. Cole sua chave no lobby.');
-  const history = messages.slice(0, -1);
-  const lastMsg = messages[messages.length - 1];
-  const userText = typeof lastMsg.content === 'string' ? lastMsg.content : JSON.stringify(lastMsg.content);
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`;
-  const body = {
-    system_instruction: { parts: [{ text: systemPrompt }] },
-    contents: [
-      ...toGeminiHistory(history),
-      { role: 'user', parts: [{ text: userText }] }
-    ],
-    generationConfig: { maxOutputTokens: maxTokens, temperature: 0.85, topP: 0.95 }
-  };
-  const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await resp.json();
-  if (data.error) throw new Error(data.error.message);
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-}
-
 async function callCerebras(systemPrompt, userPrompt, maxTokens=1000, history=[]) {
   const prompt = [
     { role:'system', content: systemPrompt },
@@ -1098,28 +1078,13 @@ function initApiKeyUI() {
   const gemBox = document.getElementById('apikey-status-box');
   const cerBox = document.getElementById('cerebras-status-box');
   const cfBox = document.getElementById('cloudflare-status-box');
-  if (geminiKey && geminiKey.startsWith('AIza')) {
+  // As chaves agora estão no Vercel (process.env) — mostrar status local
+  if (gemBox) {
     gemBox.style.display = 'block';
-    gemBox.innerHTML = '<div class="apikey-status ok">✓ Chave Gemini ativa — Juiz pronto!</div>';
-    const inp = document.getElementById('inp-apikey'); if (inp) inp.value = geminiKey;
-  } else {
-    gemBox.style.display = 'block';
-    gemBox.innerHTML = '<div class="apikey-status no">⚠ Cole sua chave Gemini para ativar o Juiz IA</div>';
+    gemBox.innerHTML = '<div class="apikey-status ok">✓ Juiz IA conectado ao servidor seguro</div>';
   }
-  if (cerebrasKey) {
-    cerBox.style.display = 'block';
-    cerBox.innerHTML = '<div class="apikey-status ok">✓ Chave Cerebras ativa — fallback disponível</div>';
-    const inp = document.getElementById('inp-cerebras-key'); if (inp) inp.value = cerebrasKey;
-  } else {
-    cerBox.style.display = 'none';
-  }
-  if (cloudflareKey) {
-    cfBox.style.display = 'block';
-    cfBox.innerHTML = '<div class="apikey-status ok">✓ Cloudflare ativa como fallback</div>';
-    const inp = document.getElementById('inp-cloudflare-key'); if (inp) inp.value = cloudflareKey;
-  } else {
-    cfBox.style.display = 'none';
-  }
+  if (cerBox) cerBox.style.display = 'none';
+  if (cfBox) cfBox.style.display = 'none';
 }
 
 function clearApiKey() {
