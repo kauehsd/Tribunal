@@ -296,8 +296,8 @@ function setupRealtimeListeners(){
   roomRef.child('scoreDef').on('value', s => { const v = s.val(); if(v!==null) $('sc-def').textContent = v; });
   // notes
   roomRef.child('notes').on('value', s => { const v = s.val(); if(v!==null){ const ta = $('notas-ta'); if(ta) ta.value = v; updateNotasCount(); } });
-  // IA assistant chat
-  roomRef.child('ia_chat').on('child_added', snap => { const msg = snap.val(); if(!msg) return; appendIaMessage(msg); });
+  // IA assistant chat — privado por jogador (cada um tem seu canal)
+  roomRef.child(`ia_chat_${localClientId}`).on('child_added', snap => { const msg = snap.val(); if(!msg) return; appendIaMessage(msg); });
   // verdict
   roomRef.child('verdict').on('value', s=>{ const v = s.val(); if(v) renderVerdict(v); });
   // pedidos do parceiro — sincroniza campos do adversário
@@ -390,14 +390,19 @@ async function sendIaMsg(){ const ta = $('ia-inp'); if(!ta) return; const text =
   const moderation = moderateText(text);
   if(moderation.blocked){ showToast(`Mensagem bloqueada por moderação local: ${moderation.word}`); return; }
   ta.value='';
+  // canal privado por jogador — o parceiro não vê
+  const iaChannel = `ia_chat_${localClientId}`;
   const userMsg = { sender: state.myName, text, ts: Date.now(), type:'user' };
-  if(roomRef){ await roomRef.child('ia_chat').push(userMsg); } else { appendIaMessage(userMsg); }
+  if(roomRef){ await roomRef.child(iaChannel).push(userMsg); } else { appendIaMessage(userMsg); }
   try{
     const resp = await window.callAI?.('Assistente', text, 400, []);
     const reply = { sender:'Assistente', text: resp || 'Não foi possível obter resposta no momento.', ts: Date.now(), type:'ai' };
-    if(roomRef){ await roomRef.child('ia_chat').push(reply); } else { appendIaMessage(reply); }
-  }catch(e){ console.warn('assist fail', e); const errMsg = { sender:'Assistente', text:'Falha ao consultar o assistente IA. Tente novamente.', ts: Date.now(), type:'ai' }; if(roomRef){ await roomRef.child('ia_chat').push(errMsg); } else { appendIaMessage(errMsg); } }
+    if(roomRef){ await roomRef.child(iaChannel).push(reply); } else { appendIaMessage(reply); }
+  }catch(e){ console.warn('assist fail', e); const errMsg = { sender:'Assistente', text:'Falha ao consultar o assistente IA. Tente novamente.', ts: Date.now(), type:'ai' }; if(roomRef){ await roomRef.child(iaChannel).push(errMsg); } else { appendIaMessage(errMsg); } }
 }
+
+// pills do chat do debate — manda direto pro chat geral (não pro assistente IA)
+function chatQuickSend(text){ const ta = $('chat-inp'); if(!ta) return; ta.value = text; sendMessage(); }
 
 async function requestJudge(){
   // collect last N messages
@@ -507,7 +512,7 @@ function renderCaseDetails(caseObj){
 
   const quick = $('art-quick-row');
   if(quick){
-    quick.innerHTML = (caseObj.arts_rapidos||[]).map(item=>`<button type="button" class="art-quick-pill" onclick="iaQuickAsk('Explique como usar ${escapeHtml(item)} no caso ${escapeHtml(caseObj.titulo)}')">${escapeHtml(item)}</button>`).join('');
+    quick.innerHTML = (caseObj.arts_rapidos||[]).map(item=>`<button type="button" class="art-quick-pill" onclick="chatQuickSend('Explique como usar ${escapeHtml(item)} no caso ${escapeHtml(caseObj.titulo)}')">${escapeHtml(item)}</button>`).join('');
   }
 
   const vadeGrid = $('vade-grid');
@@ -576,7 +581,7 @@ function clearNotas(){ const ta = $('notas-ta'); if(ta) ta.value=''; if(roomRef)
 function iaQuickAsk(q){ const ta = $('ia-inp'); if(!ta) return; ta.value = q; sendIaMsg(); }
 
 // Expose simple handlers globally
-window.backToLobby = backToLobby; window.showTab = showTab; window.onChatInput = onChatInput; window.onChatKey = onChatKey; window.onIaInpInput = onIaInpInput; window.onIaInpKey = onIaInpKey; window.onNotasInput = onNotasInput; window.clearNotas = clearNotas; window.iaQuickAsk = iaQuickAsk; window.sendIaMsg = sendIaMsg; window.calcPena = calcPena; window.toggleCalcFactor = toggleCalcFactor;
+window.backToLobby = backToLobby; window.showTab = showTab; window.onChatInput = onChatInput; window.onChatKey = onChatKey; window.onIaInpInput = onIaInpInput; window.onIaInpKey = onIaInpKey; window.onNotasInput = onNotasInput; window.clearNotas = clearNotas; window.iaQuickAsk = iaQuickAsk; window.chatQuickSend = chatQuickSend; window.sendIaMsg = sendIaMsg; window.calcPena = calcPena; window.toggleCalcFactor = toggleCalcFactor;
 
 function showNotasTab(tab){ document.getElementById('notas-panel-pad').classList.toggle('active', tab==='pad'); document.getElementById('notas-panel-ia').classList.toggle('active', tab==='ia'); document.querySelectorAll('.notas-tab').forEach(b=>b.classList.toggle('active', b.textContent.includes(tab==='pad'?'ANOTAÇÕES':'ASSISTENTE'))); }
 
