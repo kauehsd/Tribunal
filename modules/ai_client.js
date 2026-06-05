@@ -1,12 +1,19 @@
-// modules/ai_client.js — cliente que tenta proxy, luego Gemini, Cerebras, Cloudflare e fallback local
+// modules/ai_client.js — ATUALIZADO: aponta pro backend no Render
+// ⚠️ Troque a URL abaixo pela URL real do seu serviço no Render
+const RENDER_URL = 'https://tribunal-do-casal-api.onrender.com';
+
 export async function askProxy(caseObj, messages) {
-  const url = '/api/judge';
+  const url = `${RENDER_URL}/api/judge`;
   try {
-    const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ caseObj, messages }) });
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caseObj, messages })
+    });
     if (!r.ok) throw new Error('proxy_failed');
     const data = await r.json();
     return data.text || (data.result && data.result.text) || null;
-  } catch(e){
+  } catch(e) {
     throw e;
   }
 }
@@ -63,30 +70,4 @@ export async function askCerebrasDirect(caseObj, messages, key){
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.error?.message || 'cerebras_error');
   return parseAiResponse(data?.choices?.[0]?.message?.content || '');
-}
-
-async function resolveCloudflareAccountId(apiToken){
-  const url = 'https://api.cloudflare.com/client/v4/accounts';
-  const resp = await fetch(url, { method:'GET', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${apiToken}` } });
-  const data = await resp.json();
-  if(!resp.ok) throw new Error(data?.errors?.[0]?.message || data?.error || 'cloudflare_account_lookup_failed');
-  const accountId = data?.result?.[0]?.id;
-  if(!accountId) throw new Error('cloudflare_no_account_found');
-  return accountId;
-}
-
-export async function askCloudflareDirect(caseObj, messages, key){
-  if(!key) throw new Error('missing_cloudflare_key');
-  let accountId = key;
-  if(/^cfut_/.test(key) || /^pk_/.test(key) || /^sk_/.test(key)){
-    accountId = await resolveCloudflareAccountId(key);
-  }
-  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/meta/llama-3.1-8b-instruct`;
-  const systemPrompt = 'Você é Dr. Augusto Melo, Juiz de direito experiente em direito penal. Analise o caso de forma objetiva e construtiva.';
-  const debate = buildJudgePrompt(caseObj, messages);
-  const body = { messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: debate }], max_tokens: 800 };
-  const resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`}, body:JSON.stringify(body) });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data?.errors?.[0]?.message || data?.error || 'cloudflare_error');
-  return data?.result?.response || '';
 }
