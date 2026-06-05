@@ -791,11 +791,7 @@ input:disabled{cursor:not-allowed;opacity:.5;}
             <div class="score-vs">vs</div>
             <div class="score-side def"><div class="ss-lbl def">🛡️ defesa</div><div class="ss-num" id="sc-def">0</div></div>
           </div>
-          <div class="score-btns">
-            <button class="score-btn acu" onclick="addScore('acu')">+ Ponto Acusação</button>
-            <button class="score-btn def" onclick="addScore('def')">+ Ponto Defesa</button>
-            <button class="score-btn rst" onclick="resetScore()">↺</button>
-          </div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-align:center;margin-top:6px;letter-spacing:.06em;">// placar atualizado pelo juiz IA</div>
         </div>
       </div>
     </div>
@@ -809,11 +805,11 @@ input:disabled{cursor:not-allowed;opacity:.5;}
           <div class="pp-row">
             <div class="pp-side acu">
               <div class="pp-label acu">⚔️ ACUSAÇÃO pede</div>
-              <input class="pp-inp acu" id="pena-acu" type="text" placeholder="Ex: 4 anos, fechado" maxlength="60" oninput="onPedidoInput('acu')">
+              <input class="pp-inp acu" id="pena-acu" type="text" placeholder="Ex: 4 anos, fechado" maxlength="60" oninput="onPedidoInput('acu')" data-side="acusacao">
             </div>
             <div class="pp-side def">
               <div class="pp-label def">🛡️ DEFESA pede</div>
-              <input class="pp-inp def" id="pena-def" type="text" placeholder="Ex: Absolvição" maxlength="60" oninput="onPedidoInput('def')">
+              <input class="pp-inp def" id="pena-def" type="text" placeholder="Ex: Absolvição" maxlength="60" oninput="onPedidoInput('def')" data-side="defesa">
             </div>
           </div>
           <div id="pedido-sync-status" style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-top:10px;min-height:14px;"></div>
@@ -884,11 +880,11 @@ input:disabled{cursor:not-allowed;opacity:.5;}
                 <div class="ia-welcome-text">Olá! Pode me perguntar qualquer coisa sobre o caso — estratégia, artigos, como rebater um argumento, o que achar. Não vou fazer o trabalho por você, mas posso te ajudar a pensar. 💡</div>
                 <div class="ia-suggest-label">// sugestões rápidas</div>
                 <div class="ia-suggest-pills" id="ia-quick-btns">
-                  <button class="ia-suggest-pill" onclick="iaFillInput('Quais são os pontos mais fortes da minha posição neste caso?')">💪 Meus pontos fortes</button>
-                  <button class="ia-suggest-pill" onclick="iaFillInput('Quais as vulnerabilidades da posição adversária?')">🔍 Fraquezas do adversário</button>
-                  <button class="ia-suggest-pill" onclick="iaFillInput('Quais artigos do Código Penal devo invocar e como?')">📖 Artigos para usar</button>
-                  <button class="ia-suggest-pill" onclick="iaFillInput('Me dê uma linha de raciocínio jurídico para minha posição.')">🧠 Linha de raciocínio</button>
-                  <button class="ia-suggest-pill" onclick="iaFillInput('Como rebater o argumento mais forte da parte contrária?')">🛡️ Como rebater</button>
+                  <button class="ia-suggest-pill" onclick="iaQuickAsk('Quais são os pontos mais fortes da minha posição neste caso?')">💪 Meus pontos fortes</button>
+                  <button class="ia-suggest-pill" onclick="iaQuickAsk('Quais as vulnerabilidades da posição adversária?')">🔍 Fraquezas do adversário</button>
+                  <button class="ia-suggest-pill" onclick="iaQuickAsk('Quais artigos do Código Penal devo invocar e como?')">📖 Artigos para usar</button>
+                  <button class="ia-suggest-pill" onclick="iaQuickAsk('Me dê uma linha de raciocínio jurídico para minha posição.')">🧠 Linha de raciocínio</button>
+                  <button class="ia-suggest-pill" onclick="iaQuickAsk('Como rebater o argumento mais forte da parte contrária?')">🛡️ Como rebater</button>
                 </div>
               </div>
             </div>
@@ -1435,7 +1431,7 @@ ARTIGOS: Art. 121 (homicídio doloso - dolo eventual), Art. 302 CTB §2º e §3�
     id:'07', nome:'O Influencer e o Like',
     tags:[{t:'INJÚRIA RACIAL',c:'tr'},{t:'RACISMO',c:'tg'},{t:'CRIME VIRTUAL',c:'tb'}],
     titulo:'O Post que Não Saiu',
-    corpo:`<strong>Caio, 31 anos, influencer com 180k seguidores</strong>, publicou stories atacando <strong>Dra. Patrícia, médica negra</strong>, após ela recusar segui-lo no Instagram. Usou termos racistas explícitos e insinuou que ela tinha diploma falso. Post ficou no ar 14h, <strong>visto por 43.000 pessoas</strong>. Caio deletou e disse que foi \"brincadeira\"`,
+    corpo:`<strong>Caio, 31 anos, influencer com 180k seguidores</strong>, publicou stories atacando <strong>Dra. Patrícia, médica negra</strong>, após ela recusar segui-lo no Instagram. Usou termos racistas explícitos e insinuou que ela tinha diploma falso. Post ficou no ar 14h, <strong>visto por 43.000 pessoas</strong>. Caio deletou e disse que foi "brincadeira"`,
     hot:['Post deletado pode ser crime? Há prova?','Injúria racial (Art. 140 §3º) vs Racismo (Lei 7.716)?','43.000 visualizações = dano moral coletivo?','Réu primário + "brincadeira" atenua?'],
     perguntas_acu:['Screenshots provam o dolo?','Ataque à profissão + raça = racismo (Lei 7.716)?','43.000 views = dano moral quantificável?','Post deletado demonstra consciência do crime?'],
     perguntas_def:['Injúria racial (prescritível) vs racismo (imprescritível) — qual se aplica?','A "brincadeira" afasta o dolo específico?','Screenshots podem ser adulterados?','Réu primário, post deletado: suspensão condicional é cabível?'],

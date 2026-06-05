@@ -1,47 +1,16 @@
 import { LocalJudge } from './judge_local.js';
-import { askProxy, askGeminiDirect, askCerebrasDirect, askCloudflareDirect } from './modules/ai_client.js';
-
-function getKey(){ return localStorage.getItem('tribunal_gemini_key') || window.DEFAULT_GEMINI_KEY || ''; }
-function getCerebrasKey(){ return localStorage.getItem('tribunal_cerebras_key') || window.DEFAULT_CEREBRAS_KEY || ''; }
-function getCloudflareKey(){ return localStorage.getItem('tribunal_cloudflare_key') || window.DEFAULT_CLOUDFLARE_KEY || ''; }
+import { askProxy } from './modules/ai_client.js';
 
 async function tryFallbackAIs(caseObj, messages){
-  // 1. proxy Vercel primeiro
+  // proxy Render (única fonte de IA — chaves ficam no servidor)
   try{
-    const txt = await askProxy(caseObj, messages);
-    if(txt) return txt;
+    const result = await askProxy(caseObj, messages);
+    if(result && result.text) return result; // { text, provider }
   }catch(e){ console.warn('proxy failed', e.message||e); }
 
-  // 2. Gemini direto
-  const geminiKey = getKey();
-  if(geminiKey){
-    try{
-      const txt = await askGeminiDirect(caseObj, messages, geminiKey);
-      if(txt) return txt;
-    }catch(e){ console.warn('gemini direct failed', e.message||e); }
-  }
-
-  // 3. Cerebras direto
-  const cerebrasKey = getCerebrasKey();
-  if(cerebrasKey){
-    try{
-      const txt = await askCerebrasDirect(caseObj, messages, cerebrasKey);
-      if(txt) return txt;
-    }catch(e){ console.warn('cerebras direct failed', e.message||e); }
-  }
-
-  // 4. Cloudflare direto
-  const cloudflareKey = getCloudflareKey();
-  if(cloudflareKey){
-    try{
-      const txt = await askCloudflareDirect(caseObj, messages, cloudflareKey);
-      if(txt) return txt;
-    }catch(e){ console.warn('cloudflare direct failed', e.message||e); }
-  }
-
-  // 5. fallback local (último recurso)
+  // fallback local (offline)
   const local = LocalJudge.generateIntervention(caseObj, messages);
-  return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
+  return { text: `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`, provider: 'local' };
 }
 
 export async function askJudge(caseObj, messages){
@@ -56,7 +25,8 @@ export async function askJudge(caseObj, messages){
 export async function askAI(systemPrompt, userPrompt, maxTokens=800, history=[]){
   const messages = [...history, { sender:'Usuário', role:'user', text:userPrompt }];
   const caseObj = { titulo:'Assistente IA', context_juiz:userPrompt };
-  return await tryFallbackAIs(caseObj, messages);
+  const result = await tryFallbackAIs(caseObj, messages);
+  return (result && result.text) ? result.text : result;
 }
 
 if(typeof window !== 'undefined'){
@@ -64,6 +34,6 @@ if(typeof window !== 'undefined'){
   window.AIJudge = { ask: askJudge };
   window.callAI = askAI;
   window.callGemini = async function(system, userPrompt){
-    return await askJudge({ titulo:'Caso genérico', context_juiz:userPrompt }, [{ sender:'Usuário', role:'user', text:userPrompt }]);
+    return await askAI(system, userPrompt);
   };
 }

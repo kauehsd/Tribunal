@@ -346,7 +346,8 @@ function appendChatMessage(msg){
   let bubbleContent = escapeHtml(msg.text||'').replace(/\n/g,'<br>');
   let header, bubble;
   if(isJudge){
-    header = `<div class="msg-header"><span class="msg-role juiz">⚖️ Juiz</span><span class="msg-time">${time}</span></div>`;
+    const providerLabel = msg.provider ? `<span style="font-family:var(--mono);font-size:8px;color:var(--text3);margin-left:6px;letter-spacing:.06em;">⚡ ${escapeHtml(msg.provider)}</span>` : '';
+    header = `<div class="msg-header"><span class="msg-role juiz">⚖️ Juiz${providerLabel}</span><span class="msg-time">${time}</span></div>`;
     bubble = `<div class="msg-bubble">${bubbleContent}</div>`;
   } else {
     header = `<div class="msg-header"><span class="msg-role ${roleCls}">${escapeHtml(msg.sender||'')}</span><span class="msg-time">${time}</span></div>`;
@@ -449,13 +450,15 @@ async function requestJudge(){
 
     // 1. tenta IA inteligente via proxy/askJudge
     if(window.askJudge){
-      const answer = await window.askJudge(caseObjComPedidos, msgs);
+      const result = await window.askJudge(caseObjComPedidos, msgs);
+      const answer = (result && typeof result === 'object') ? (result.text || '') : result;
+      const provider = (result && result.provider) ? result.provider : undefined;
       if(roomRef){
-        await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' });
+        await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge', ...(provider && {provider}) });
         await roomRef.child('verdict').set({ text: answer, ts: Date.now() });
         await applyJudgeScore(answer);
       } else {
-        appendChatMessage({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' });
+        appendChatMessage({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge', ...(provider && {provider}) });
       }
     } else if(window.localJudgeAnalyze){
       // 2. fallback local só se askJudge não existir
@@ -659,6 +662,22 @@ function launchGame(){
   $('gtb-role-txt').textContent = state.myRole==='acusacao'?'ACUSAÇÃO':'DEFESA';
   const badge = $('gtb-badge');
   if(badge) badge.className = `gtb-badge ${state.myRole}`;
+
+  // Travar campo de pena do adversário — cada lado só edita o próprio
+  const acuInp = $('pena-acu');
+  const defInp = $('pena-def');
+  if(acuInp && state.myRole !== 'acusacao'){
+    acuInp.readOnly = true;
+    acuInp.style.opacity = '0.45';
+    acuInp.style.cursor = 'not-allowed';
+    acuInp.placeholder = 'Aguardando acusação...';
+  }
+  if(defInp && state.myRole !== 'defesa'){
+    defInp.readOnly = true;
+    defInp.style.opacity = '0.45';
+    defInp.style.cursor = 'not-allowed';
+    defInp.placeholder = 'Aguardando defesa...';
+  }
 }
 
 function selectCase(i){ if(window.CASES){ state.caseIdx = i; document.querySelectorAll('.case-chip').forEach((el,j)=>el.classList.toggle('active',j===i)); const caseObj = window.CASES[i]; if(caseObj){ renderCaseDetails(caseObj); const title = $('gtb-title'); if(title) title.textContent = `Sala ${state.roomCode} • ${caseObj.nome}`; } }}

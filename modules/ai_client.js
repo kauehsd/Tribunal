@@ -12,11 +12,9 @@ export async function askProxy(caseObj, messages) {
   });
   if (!r.ok) throw new Error('proxy_failed');
   const data = await r.json();
-  return data.text || null;
+  // Retorna objeto com text e provider para exibir badge
+  return { text: data.text || null, provider: data.provider || null };
 }
-
-// Funções abaixo exportadas apenas para satisfazer o import do ai-bridge.js
-// Elas jogam de volta pro proxy — não chamam nada diretamente.
 
 export async function askGeminiDirect(caseObj, messages, key) {
   return askProxy(caseObj, messages);
