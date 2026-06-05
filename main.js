@@ -395,7 +395,12 @@ async function sendIaMsg(){ const ta = $('ia-inp'); if(!ta) return; const text =
   const userMsg = { sender: state.myName, text, ts: Date.now(), type:'user' };
   if(roomRef){ await roomRef.child(iaChannel).push(userMsg); } else { appendIaMessage(userMsg); }
   try{
-    const resp = await window.callAI?.('Assistente', text, 400, []);
+    const caseCtx = window.CASES && window.CASES[state.caseIdx];
+    const caseInfo = caseCtx ? `Caso: ${caseCtx.titulo}. ${caseCtx.context_juiz||''}` : '';
+    const roleInfo = state.myRole === 'acusacao' ? 'Acusação' : 'Defesa';
+    const systemPrompt = `Você é um assistente jurídico estratégico para um jogo de debate penal. O jogador joga como ${roleInfo}. ${caseInfo}
+Regras: ajude o jogador a PENSAR, não escreva os argumentos por ele. Faça perguntas reflexivas. Indique artigos e jurisprudências relevantes. Seja direto, técnico e didático. Responda em no máximo 3 parágrafos.`;
+    const resp = await window.callAI?.(systemPrompt, text, 500, []);
     const reply = { sender:'Assistente', text: resp || 'Não foi possível obter resposta no momento.', ts: Date.now(), type:'ai' };
     if(roomRef){ await roomRef.child(iaChannel).push(reply); } else { appendIaMessage(reply); }
   }catch(e){ console.warn('assist fail', e); const errMsg = { sender:'Assistente', text:'Falha ao consultar o assistente IA. Tente novamente.', ts: Date.now(), type:'ai' }; if(roomRef){ await roomRef.child(iaChannel).push(errMsg); } else { appendIaMessage(errMsg); } }
@@ -486,6 +491,12 @@ function renderCaseDetails(caseObj){
   if(caseObj.antecedentes || caseObj.antecedentes_criminais){
     contextBlock.push(`<div class="card"><div class="section-lbl">// antecedentes</div>${caseObj.antecedentes?`<div class="brief-body"><strong>Perfil social:</strong> ${escapeHtml(caseObj.antecedentes)}</div>`:''}${caseObj.antecedentes_criminais?`<div class="brief-body" style="margin-top:10px;"><strong>Antecedentes criminais:</strong> ${escapeHtml(caseObj.antecedentes_criminais)}</div>`:''}</div>`);
   }
+  if(caseObj.provas?.length){
+    contextBlock.push(`<div class="card"><div class="section-lbl">// provas e evidências</div><div class="brief-body">${caseObj.provas.map(p=>`<div style="margin-bottom:6px;">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
+  }
+  if(caseObj.linha_tempo?.length){
+    contextBlock.push(`<div class="card"><div class="section-lbl">// linha do tempo</div><div class="brief-body">${caseObj.linha_tempo.map(e=>`<div style="margin-bottom:5px;"><strong style="color:var(--gold2);">${escapeHtml(e.hora||e.data||'')}</strong> — ${escapeHtml(e.fato)}</div>`).join('')}</div></div>`);
+  }
   if(caseObj.context_juiz){
     contextBlock.push(`<div class="card"><div class="section-lbl">// resumo para o juiz</div><div class="brief-body">${escapeHtml(caseObj.context_juiz).replace(/\n/g,'<br>')}</div></div>`);
   }
@@ -519,7 +530,29 @@ function renderCaseDetails(caseObj){
   if(vadeGrid){
     vadeGrid.innerHTML = (caseObj.vade||[]).map(item => {
       const roleText = state.myRole==='acusacao' ? item.use_acu : item.use_def;
-      return `<div class="art-card" onclick="toggleArtCard(this)"><div class="art-header"><div class="art-header-content"><div class="art-name">${escapeHtml(item.nome)}</div><div class="art-pena">${escapeHtml(item.pena||'')}</div></div><div class="art-chevron">›</div></div><div class="art-body"><div class="art-texto">${escapeHtml(item.texto)}</div><div class="art-exp">${escapeHtml(item.exp||'')}</div><div class="art-juris">${escapeHtml(item.juris||'')}</div><div class="art-simple"><div class="art-simple-lbl">Estratégia para ${state.myRole==='acusacao'?'Acusação':'Defesa'}</div><div class="art-simple-txt">${escapeHtml(roleText||'')}</div></div></div></div>`;
+      const roleLabel = state.myRole==='acusacao'?'Acusação':'Defesa';
+      const oppText = state.myRole==='acusacao' ? item.use_def : item.use_acu;
+      const oppLabel = state.myRole==='acusacao'?'Defesa':'Acusação';
+      return `<div class="art-card" onclick="toggleArtCard(this)">
+        <div class="art-header">
+          <div class="art-header-content">
+            <div class="art-num-badge">${escapeHtml(item.num||'')}</div>
+            <div class="art-name">${escapeHtml(item.nome)}</div>
+            <div class="art-pena">${escapeHtml(item.pena||'')}</div>
+          </div>
+          <div class="art-chevron">›</div>
+        </div>
+        <div class="art-body">
+          <div class="art-texto-label">// texto legal</div>
+          <div class="art-texto">${escapeHtml(item.texto)}</div>
+          <div class="art-exp-label">// o que isso significa na prática</div>
+          <div class="art-exp">${escapeHtml(item.exp||'')}</div>
+          ${item.simple?`<div class="art-simple"><div class="art-simple-lbl">💡 em linguagem simples</div><div class="art-simple-txt">${escapeHtml(item.simple)}</div></div>`:''}
+          <div class="art-strategy-block asb-mine"><div class="asb-label">⚔️ Como ${roleLabel} usa isso</div><div class="art-simple-txt">${escapeHtml(roleText||'')}</div></div>
+          <div class="art-strategy-block asb-opp"><div class="asb-label">🛡️ Como ${oppLabel} pode responder</div><div class="art-simple-txt">${escapeHtml(oppText||'')}</div></div>
+          ${item.juris?`<div class="art-juris">📚 ${escapeHtml(item.juris)} <span style="color:var(--text3);font-size:9px;">${escapeHtml(item.ref||'')}</span></div>`:''}
+        </div>
+      </div>`;
     }).join('');
   }
   initializeCalcPanel(caseObj);
@@ -579,9 +612,11 @@ function onNotasInput(){ const ta = $('notas-ta'); if(!ta) return; updateNotasCo
 function clearNotas(){ const ta = $('notas-ta'); if(ta) ta.value=''; if(roomRef) roomRef.child('notes').set(''); }
 
 function iaQuickAsk(q){ const ta = $('ia-inp'); if(!ta) return; ta.value = q; sendIaMsg(); }
+// Preenche o campo mas deixa o jogador editar antes de enviar
+function iaFillInput(q){ const ta = $('ia-inp'); if(!ta) return; ta.value = q; ta.focus(); ta.style.height='auto'; ta.style.height=Math.min(120,ta.scrollHeight)+'px'; }
 
 // Expose simple handlers globally
-window.backToLobby = backToLobby; window.showTab = showTab; window.onChatInput = onChatInput; window.onChatKey = onChatKey; window.onIaInpInput = onIaInpInput; window.onIaInpKey = onIaInpKey; window.onNotasInput = onNotasInput; window.clearNotas = clearNotas; window.iaQuickAsk = iaQuickAsk; window.chatQuickSend = chatQuickSend; window.sendIaMsg = sendIaMsg; window.calcPena = calcPena; window.toggleCalcFactor = toggleCalcFactor;
+window.backToLobby = backToLobby; window.showTab = showTab; window.onChatInput = onChatInput; window.onChatKey = onChatKey; window.onIaInpInput = onIaInpInput; window.onIaInpKey = onIaInpKey; window.onNotasInput = onNotasInput; window.clearNotas = clearNotas; window.iaQuickAsk = iaQuickAsk; window.iaFillInput = iaFillInput; window.chatQuickSend = chatQuickSend; window.sendIaMsg = sendIaMsg; window.calcPena = calcPena; window.toggleCalcFactor = toggleCalcFactor;
 
 function showNotasTab(tab){ document.getElementById('notas-panel-pad').classList.toggle('active', tab==='pad'); document.getElementById('notas-panel-ia').classList.toggle('active', tab==='ia'); document.querySelectorAll('.notas-tab').forEach(b=>b.classList.toggle('active', b.textContent.includes(tab==='pad'?'ANOTAÇÕES':'ASSISTENTE'))); }
 

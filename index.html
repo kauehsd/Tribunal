@@ -242,6 +242,13 @@ body::before{content:'';position:fixed;inset:0;background:
 .art-simple{background:rgba(58,184,122,.05);border:1px solid rgba(58,184,122,.15);border-radius:8px;padding:10px 12px;margin-bottom:10px;}
 .art-simple-lbl{font-family:var(--mono);font-size:9px;color:var(--green2);letter-spacing:.08em;margin-bottom:5px;}
 .art-simple-txt{font-size:12px;color:var(--text2);line-height:1.55;}
+/* ── Vade melhorado ── */
+.art-num-badge{font-family:var(--mono);font-size:9px;color:var(--gold);letter-spacing:.06em;margin-bottom:2px;}
+.art-texto-label,.art-exp-label{font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.08em;margin-top:10px;margin-bottom:3px;}
+.asb-mine{background:rgba(201,149,58,.07);border-left:3px solid var(--gold);}
+.asb-opp{background:rgba(100,120,180,.07);border-left:3px solid rgba(120,140,220,.5);}
+/* ── Caso: provas e linha do tempo ── */
+.brief-body strong{color:var(--gold2);}
 
 /* ══ CHAT ══ */
 #tab-chat{display:none;flex-direction:column;overflow:hidden;}
@@ -508,7 +515,14 @@ input[type=range]::-moz-range-thumb{width:26px;height:26px;border-radius:50%;bac
 .inst-chat-inp{flex:1;background:var(--s3);border:1px solid var(--b2);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--sans);font-size:13px;outline:none;resize:none;min-height:44px;max-height:80px;transition:border-color .18s;} 
 .inst-chat-inp:focus{border-color:var(--gold);} 
 .inst-chat-send{padding:0 14px;border-radius:8px;border:none;background:var(--gold);color:#1a1000;font-family:var(--mono);font-size:10px;letter-spacing:.06em;cursor:pointer;min-height:44px;flex-shrink:0;font-weight:500;transition:all .15s;} 
-.inst-chat-send:hover{background:var(--gold2);} 
+.inst-chat-send:hover{background:var(--gold2);}
+/* ── IA Welcome & Suggest Pills ── */
+.ia-welcome-msg{padding:12px 14px 8px;border-bottom:1px solid var(--b1);margin-bottom:8px;}
+.ia-welcome-text{font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:10px;}
+.ia-suggest-label{font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.08em;margin-bottom:6px;}
+.ia-suggest-pills{display:flex;flex-wrap:wrap;gap:6px;}
+.ia-suggest-pill{background:var(--s2);border:1px solid var(--b1);border-radius:16px;padding:5px 12px;font-family:var(--mono);font-size:10px;color:var(--text2);cursor:pointer;transition:all .15s;white-space:nowrap;}
+.ia-suggest-pill:hover{border-color:var(--gold);color:var(--gold);background:var(--gold-d);} 
 .inst-msg-j{text-align:center;font-family:var(--mono);font-size:9px;color:var(--gold2);background:rgba(201,149,58,.06);border:1px solid rgba(201,149,58,.15);border-radius:8px;padding:8px 12px;line-height:1.5;} 
 
 /* ══ SYNC TOAST / JUDGE FLASH ══ */
@@ -865,18 +879,22 @@ input:disabled{cursor:not-allowed;opacity:.5;}
               <a href="https://aistudio.google.com/app/apikey" target="_blank">Obter chave grátis →</a><br>
               Cole a chave no lobby para ativar.
             </div>
-            <div class="ia-quick-btns" id="ia-quick-btns">
-              <button class="ia-quick-btn" data-prompt="Quais são os pontos mais fortes da minha posição neste caso?">💪 Meus pontos fortes</button>
-              <button class="ia-quick-btn" data-prompt="Qual argumento devo usar primeiro para causar impacto?">🎯 Argumento de impacto</button>
-              <button class="ia-quick-btn" data-prompt="Quais as vulnerabilidades da posição adversária?">🔍 Fraquezas do adversário</button>
-              <button class="ia-quick-btn" data-prompt="Quais artigos do Código Penal devo invocar e como?">📖 Artigos para usar</button>
-              <button class="ia-quick-btn" data-prompt="Me dê uma linha de raciocínio jurídico completa para minha posição.">🧠 Linha de raciocínio</button>
-              <button class="ia-quick-btn" data-prompt="Como rebater o argumento mais forte da parte contrária?">🛡️ Como rebater</button>
+            <div class="ia-chat-msgs" id="ia-chat-msgs">
+              <div class="ia-welcome-msg">
+                <div class="ia-welcome-text">Olá! Pode me perguntar qualquer coisa sobre o caso — estratégia, artigos, como rebater um argumento, o que achar. Não vou fazer o trabalho por você, mas posso te ajudar a pensar. 💡</div>
+                <div class="ia-suggest-label">// sugestões rápidas</div>
+                <div class="ia-suggest-pills" id="ia-quick-btns">
+                  <button class="ia-suggest-pill" onclick="iaFillInput('Quais são os pontos mais fortes da minha posição neste caso?')">💪 Meus pontos fortes</button>
+                  <button class="ia-suggest-pill" onclick="iaFillInput('Quais as vulnerabilidades da posição adversária?')">🔍 Fraquezas do adversário</button>
+                  <button class="ia-suggest-pill" onclick="iaFillInput('Quais artigos do Código Penal devo invocar e como?')">📖 Artigos para usar</button>
+                  <button class="ia-suggest-pill" onclick="iaFillInput('Me dê uma linha de raciocínio jurídico para minha posição.')">🧠 Linha de raciocínio</button>
+                  <button class="ia-suggest-pill" onclick="iaFillInput('Como rebater o argumento mais forte da parte contrária?')">🛡️ Como rebater</button>
+                </div>
+              </div>
             </div>
-            <div class="ia-chat-msgs" id="ia-chat-msgs"></div>
             <div class="ia-chat-input-row">
-              <textarea class="ia-inp" id="ia-inp" placeholder="Pergunte sobre estratégia, artigos, argumentos..." rows="1"></textarea>
-              <button type="button" class="ia-send" id="ia-send-btn">ASK</button>
+              <textarea class="ia-inp" id="ia-inp" placeholder="Digite sua dúvida livremente..." rows="1"></textarea>
+              <button type="button" class="ia-send" id="ia-send-btn">ENVIAR</button>
             </div>
           </div>
         </div>
@@ -1124,7 +1142,26 @@ const CASES = [
 ARTIGOS EM DEBATE: Art. 155 CP (furto), §1º (noturno), §4º,I (rompimento), Art. 24 (estado de necessidade), insignificância, Art. 44 (alternativas).`,
     antecedentes:'Histórico de desemprego, sem condenações anteriores; morador de ocupação informal na cidade, recebe auxílio eventual de parentes.',
     antecedentes_criminais:'Réu primário — sem registros de condenação, apenas IPC por pequeno ilícito há 7 anos (arquivado).',
-    contexto_social:'Família monoparental com criança pequena; renda inexistente, sem apoio social formal; vive em área com serviço de saúde noturno distante.',
+    contexto_social:'Família monoparental com criança pequena; renda inexistente, sem apoio social formal; vive em área com serviço de saúde noturno distante. A UPA mais próxima fica a 8km — sem transporte regular após meia-noite.',
+    provas:[
+      'Gravação de câmera de segurança mostra Marcos forçando a porta dos fundos com objeto metálico às 02h14.',
+      'Nota fiscal interna do mercado: produtos levados avaliados em R$127,40 (fraldas, leite, paracetamol pediátrico, biscoito).',
+      'Prontuário médico da UPA: filha de Marcos (8 meses) deu entrada às 04h02 com febre de 39,4°C — registro feito APÓS o furto.',
+      'Depoimento do dono do mercado: "porta dos fundos serve como saída de emergência, não é a entrada do estoque."',
+      'Laudo técnico: arrombamento causou R$340 em danos à fechadura — valor maior que os produtos levados.',
+      'Extrato bancário de Marcos: saldo de R$0,00 há 23 dias. Última movimentação: saque de R$30 de auxílio-emergência.',
+      'Declaração de vizinha: "às 2h o menino veio bater na minha porta, eu não abri com medo."',
+    ],
+    linha_tempo:[
+      {hora:'20h30', fato:'Filha de Marcos começa a apresentar febre. Marcos não tem dinheiro, nem crédito no celular.'},
+      {hora:'21h15', fato:'Marcos tenta pedir dinheiro emprestado para dois vizinhos — ambos negam.'},
+      {hora:'23h00', fato:'Febre sobe. Marcos tenta ligar de orelhão para familiar em outra cidade — sem resposta.'},
+      {hora:'02h14', fato:'Marcos força porta dos fundos do Mercado Vitória e leva alimentos e medicamento.'},
+      {hora:'02h31', fato:'Câmera registra Marcos saindo com sacola. PM é acionada pelo alarme.'},
+      {hora:'02h48', fato:'Marcos preso em flagrante a 200m do mercado, sacola em mãos. Apresenta receio e choro ao ser abordado.'},
+      {hora:'04h02', fato:'Filha de Marcos dá entrada na UPA. Febre confirmada em 39,4°C.'},
+    ],
+    hot:['Rompimento de porta qualifica o furto (§4º,I)?','A fome extrema é estado de necessidade real?','R$127 aplica insignificância com repouso noturno?','Art. 44 garante pena alternativa?','Vizinha que negou ajuda cria responsabilidade moral da comunidade?','Dano de R$340 à porta versus R$127 levado — proporcionalidade?','Prontuário da UPA às 4h comprova ou enfraquece a urgência?'],
   },
 
   // ── CASO 02 ──
