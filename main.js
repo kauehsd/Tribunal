@@ -384,6 +384,23 @@ async function sendMessage(){
 }
 
 async function addScore(side){ if(!roomRef) return; if(side==='acu') roomRef.child('scoreAcu').transaction(v=> (v||0)+1); else roomRef.child('scoreDef').transaction(v=> (v||0)+1); }
+
+// Extrai placar da resposta do juiz e aplica ao Firebase
+async function applyJudgeScore(text){
+  if(!roomRef || !text) return;
+  try{
+    // Procura padrão "Acusação: X pontos / Defesa: Y pontos"
+    const acuMatch = text.match(/acusa[çc][ãa]o[:\s]+(\d+)\s*pontos?/i);
+    const defMatch = text.match(/defesa[:\s]+(\d+)\s*pontos?/i);
+    if(acuMatch && defMatch){
+      const acuPts = parseInt(acuMatch[1]);
+      const defPts = parseInt(defMatch[1]);
+      await roomRef.child('scoreAcu').set(acuPts);
+      await roomRef.child('scoreDef').set(defPts);
+      console.info(`[Juiz] Placar atualizado: Acusação ${acuPts} × Defesa ${defPts}`);
+    }
+  }catch(e){ console.warn('applyJudgeScore failed', e); }
+}
 function resetScore(){ if(roomRef){ roomRef.child('scoreAcu').set(0); roomRef.child('scoreDef').set(0); } }
 
 async function sendIaMsg(){ const ta = $('ia-inp'); if(!ta) return; const text = ta.value.trim(); if(!text) return;
@@ -436,6 +453,7 @@ async function requestJudge(){
       if(roomRef){
         await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' });
         await roomRef.child('verdict').set({ text: answer, ts: Date.now() });
+        await applyJudgeScore(answer);
       } else {
         appendChatMessage({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge' });
       }
@@ -472,10 +490,75 @@ async function renderVerdictRich(v){ const wrap = $('verdict-wrap'); if(!wrap) r
   let q = v.questions || null;
   if(!q && roomRef){ try{ const snap = await roomRef.child('verdict_questions').once('value'); q = snap.val(); }catch(e){} }
   if(q){ const acu = (q.perguntas_acu||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); const def = (q.perguntas_def||[]).map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join(''); questionsHtml = `<div style="margin-top:14px;"><div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.08em;margin-bottom:8px;">// PERGUNTAS DO JUIZ</div><div class="art-strategy-block asb-acu"><div class="asb-label">Para Acusação</div>${acu||'<div class=\"art-texto\">—</div>'}</div><div class="art-strategy-block asb-def" style="margin-top:8px;"><div class="asb-label">Para Defesa</div>${def||'<div class=\"art-texto\">—</div>'}</div></div>`; }
-  wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div>${questionsHtml}<div style="margin-top:16px;text-align:center;"><button class="btn-secondary" onclick="requestJudge()" style="max-width:220px;margin:0 auto;">↺ Nova análise</button></div></div>`;
+  // Botão de recurso só aparece se não for veredito final
+  const isRecurso = v.final === true;
+  const recursoBtn = isRecurso ? '' : `
+    <div style="margin-top:20px;border-top:1px solid var(--b1);padding-top:16px;">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--text3);letter-spacing:.08em;margin-bottom:10px;">// interpor recurso — argumento final</div>
+      <textarea id="recurso-inp" style="width:100%;background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--sans);font-size:13px;outline:none;resize:none;min-height:72px;box-sizing:border-box;margin-bottom:8px;" placeholder="Seu argumento de recurso — por que o veredito deve ser revisado?"></textarea>
+      <button class="btn-primary" onclick="submitRecurso()" style="max-width:100%;">⚖️ Interpor Recurso</button>
+    </div>`;
+  wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">${isRecurso?'🔨':'⚖️'}</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">${isRecurso?'Veredito Final':'Veredito Preliminar'}</div></div></div><div class="verdict-fund">${escapeHtml(v.text).replace(/\n/g,'<br>')}</div>${questionsHtml}${recursoBtn}<div style="margin-top:12px;text-align:center;"><button class="btn-secondary" onclick="requestJudge()" style="max-width:220px;margin:0 auto;">↺ Nova análise</button></div></div>`;
 }
 
 // backward-compatible entry
+async function submitRecurso(){
+  const inp = document.getElementById('recurso-inp');
+  const texto = inp ? inp.value.trim() : '';
+  if(!texto){ showToast('Escreva seu argumento de recurso antes de enviar.'); return; }
+
+  // Salva o recurso do jogador no Firebase
+  const myRole = state.myRole === 'acusacao' ? 'recursoAcu' : 'recursoDef';
+  if(roomRef) await roomRef.child('recursos').child(myRole).set({ texto, ts: Date.now() });
+
+  showToast('Recurso enviado! Aguardando o outro lado ou clique em julgar.');
+
+  // Verifica se ambos enviaram recurso (ou força julgamento imediato em solo)
+  if(roomRef){
+    const snap = await roomRef.child('recursos').once('value');
+    const recursos = snap.val() || {};
+    const recursoAcu = recursos.recursoAcu?.texto || '';
+    const recursoDef = recursos.recursoDef?.texto || '';
+
+    // Se ambos enviaram ou modo solo: julga
+    if((recursoAcu && recursoDef) || state.solo){
+      await julgaRecurso(recursoAcu || texto, recursoDef || texto);
+    }
+  }
+}
+
+async function julgaRecurso(recursoAcu, recursoDef){
+  const typingEl = $('typing-ind'); if(typingEl){ $('typing-who').textContent='Juiz'; typingEl.classList.add('show'); }
+  try{
+    const caseObj = window.CASES && window.CASES[state.caseIdx] ? window.CASES[state.caseIdx] : { titulo:'Caso' };
+    const chatSnapshot = roomRef ? await roomRef.child('chat').limitToLast(50).once('value') : { val:()=>null };
+    const msgs = [];
+    if(chatSnapshot && chatSnapshot.val()) Object.values(chatSnapshot.val()).forEach(m=> msgs.push({ sender:m.sender, role:m.role, text:m.text }));
+
+    const resp = await fetch('https://tribunal-do-casal-api.onrender.com/api/recurso', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ caseObj, messages: msgs, recursoAcu, recursoDef })
+    });
+    const data = await resp.json();
+    const text = data.text || 'Recurso não processado.';
+
+    // Aplica placar final
+    await applyJudgeScore(text);
+
+    // Salva veredito final
+    if(roomRef){
+      await roomRef.child('verdict').set({ text, ts: Date.now(), final: true });
+      await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:`⚖️ VEREDITO FINAL:\n${text}`, ts:Date.now(), type:'judge' });
+      await roomRef.child('recursos').remove(); // limpa recursos para nova rodada
+    }
+  }catch(e){
+    console.error('julgaRecurso failed', e);
+    showToast('Falha ao processar o recurso. Tente novamente.');
+  }finally{
+    const typingEl2 = $('typing-ind'); if(typingEl2) typingEl2.classList.remove('show');
+  }
+}
+
 function renderVerdict(v){ renderVerdictRich(v).catch(e=>{ console.warn('renderVerdictRich failed', e); const wrap = $('verdict-wrap'); if(!wrap) return; wrap.innerHTML = `<div class="verdict-card"><div class="verdict-stamp"><div class="vs-icon">⚖️</div><div><div class="vs-label">Juiz IA</div><div class="vs-name">Veredicto</div></div></div><div class="verdict-fund">${escapeHtml(v?.text||'Nenhum veredito registrado ainda.')} </div></div>`; }); }
 
 function renderCaseDetails(caseObj){
@@ -585,7 +668,7 @@ function selectRole(r){ state.createRole = r; document.getElementById('rc-acu')?
 function selectJoinRole(r){ state.joinRole = r; document.getElementById('rj-acu')?.classList.toggle('sel', r==='acusacao'); document.getElementById('rj-def')?.classList.toggle('sel', r==='defesa'); }
 
 // expose helpers to global scope for inline handlers
-window.createRoom = createRoom; window.joinRoom = joinRoom; window.startAnySolo = startAnySolo; window.sendMessage = sendMessage; window.addScore = addScore; window.resetScore = resetScore; window.requestJudge = requestJudge; window.launchGame = launchGame; window.selectCase = selectCase; window.selectRole = selectRole; window.selectJoinRole = selectJoinRole; window.initLobby = initLobby; window.selectJudgeQuestion = selectJudgeQuestion; window.clearJudgeQuestionSelection = clearJudgeQuestionSelection; window.submitJudgeAnswer = submitJudgeAnswer; window.toggleArtCard = toggleArtCard;
+window.createRoom = createRoom; window.joinRoom = joinRoom; window.startAnySolo = startAnySolo; window.sendMessage = sendMessage; window.addScore = addScore; window.resetScore = resetScore; window.requestJudge = requestJudge; window.launchGame = launchGame; window.selectCase = selectCase; window.selectRole = selectRole; window.selectJoinRole = selectJoinRole; window.initLobby = initLobby; window.selectJudgeQuestion = selectJudgeQuestion; window.clearJudgeQuestionSelection = clearJudgeQuestionSelection; window.submitJudgeAnswer = submitJudgeAnswer; window.toggleArtCard = toggleArtCard; window.submitRecurso = submitRecurso;
 
 // init on DOM ready
 window.addEventListener('DOMContentLoaded', ()=>{ initUI(); initFirebase(); });

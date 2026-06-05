@@ -1,5 +1,31 @@
-// api/judge.js — Vercel Serverless Function
-// Ordem: Groq → Cerebras → Cloudflare → 503
+// server.js — Backend Express para o Render
+import express from 'express';
+import cors from 'cors';
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const SYSTEM = `Você é Dr. Augusto Melo, Juiz de Direito experiente em Direito Penal Brasileiro.
+
+Analise o debate entre Acusação e Defesa e responda SEMPRE neste formato exato:
+
+## PERGUNTAS DO JUIZ
+**Para a Acusação:** [pergunta direta e técnica]
+**Para a Defesa:** [pergunta direta e técnica]
+
+## ANÁLISE
+[2-3 parágrafos avaliando os argumentos de cada lado com base nos artigos do CP. Seja técnico e cite artigos específicos.]
+
+## PLACAR PARCIAL
+Acusação: [0-10] pontos
+Defesa: [0-10] pontos
+Justificativa: [1 frase explicando o placar]
+
+## VEREDITO PRELIMINAR
+[ACUSAÇÃO VENCE / DEFESA VENCE / EMPATE] — [motivo técnico em 1 frase]
+
+Seja incisivo, justo e educativo. Nunca favoreça um lado sem argumentos técnicos.`;
 
 function buildDebate(caseObj, messages) {
   const title = caseObj?.titulo || 'Caso genérico';
@@ -7,10 +33,8 @@ function buildDebate(caseObj, messages) {
   const debate = (messages || [])
     .map(m => `${m.sender || m.role || 'Usuário'}: ${m.text || m.content || ''}`)
     .join('\n') || 'Nenhum argumento ainda.';
-  return `CASO: ${title}\n${ctx}\n\nDEBATE:\n${debate}\n\nComo Dr. Augusto Melo, Juiz experiente em direito penal: analise os argumentos, faça perguntas cirúrgicas para acusação e defesa, avalie pontos fortes e fracos de cada lado e oriente os próximos passos. Seja direto e específico ao caso.`;
+  return `CASO: ${title}\n${ctx}\n\nDEBATE ATUAL:\n${debate}\n\nAnalise este debate e responda no formato solicitado, incluindo o PLACAR PARCIAL baseado na qualidade técnica dos argumentos apresentados.`;
 }
-
-const SYSTEM = 'Você é Dr. Augusto Melo, Juiz experiente em direito penal brasileiro. Analise debates jurídicos de forma objetiva, faça perguntas pertinentes e oriente as partes com base no Código Penal.';
 
 async function tryGroq(caseObj, messages, key) {
   const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -67,12 +91,7 @@ async function tryCloudflare(caseObj, messages, key, accountId) {
   return data?.result?.response || null;
 }
 
-export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
-
+app.post('/api/judge', async (req, res) => {
   const { caseObj, messages } = req.body || {};
 
   const groqKey = process.env.GROQ_KEY;
@@ -101,4 +120,75 @@ export default async function handler(req, res) {
   }
 
   return res.status(503).json({ error: 'all_providers_failed' });
-}
+});
+
+app.post('/api/recurso', async (req, res) => {
+  const { caseObj, messages, recursoAcu, recursoDef } = req.body || {};
+
+  const recursoPrompt = `Você é Dr. Augusto Melo. As partes interpuseram recurso após o veredito preliminar.
+
+ARGUMENTO DE RECURSO DA ACUSAÇÃO: ${recursoAcu || 'Sem recurso da acusação.'}
+ARGUMENTO DE RECURSO DA DEFESA: ${recursoDef || 'Sem recurso da defesa.'}
+
+Analise os novos argumentos e emita o VEREDITO FINAL no formato:
+
+## VEREDITO FINAL
+[ACUSAÇÃO VENCE / DEFESA VENCE / EMPATE]
+
+## FUNDAMENTAÇÃO
+[2 parágrafos: avalie os recursos com base nos artigos do CP. Qual lado trouxe argumento novo e relevante?]
+
+## PLACAR FINAL
+Acusação: [0-10] pontos
+Defesa: [0-10] pontos
+
+## SENTENÇA SUGERIDA
+[1 parágrafo com a pena sugerida e regime, baseado no debate completo]`;
+
+  const groqKey = process.env.GROQ_KEY;
+  if (groqKey) {
+    try {
+      const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${groqKey}` },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: recursoPrompt }],
+          max_tokens: 800, temperature: 0.7
+        })
+      });
+      const data = await r.json();
+      if (r.ok) {
+        const text = data?.choices?.[0]?.message?.content;
+        if (text) return res.json({ text, final: true });
+      }
+    } catch (e) { console.warn('[recurso] groq failed:', e.message); }
+  }
+
+  const cerebrasKey = process.env.CEREBRAS_KEY;
+  if (cerebrasKey) {
+    try {
+      const r = await fetch('https://api.cerebras.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cerebrasKey}` },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b',
+          messages: [{ role: 'user', content: recursoPrompt }],
+          max_tokens: 800, temperature: 0.7
+        })
+      });
+      const data = await r.json();
+      if (r.ok) {
+        const text = data?.choices?.[0]?.message?.content;
+        if (text) return res.json({ text, final: true });
+      }
+    } catch (e) { console.warn('[recurso] cerebras failed:', e.message); }
+  }
+
+  return res.status(503).json({ error: 'recurso_failed' });
+});
+
+app.get('/', (req, res) => res.send('Tribunal do Casal — API online ✅'));
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
