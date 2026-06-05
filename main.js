@@ -801,3 +801,317 @@ window.showNotasTab = showNotasTab; window.clearReply = clearReply;
 
 function onPedidoInput(side){ const el = side==='acu' ? $('pena-acu') : $('pena-def'); const txt = el ? el.value.trim() : ''; if(side==='acu') $('pedido-acu-txt').textContent = txt||'Aguardando...'; else $('pedido-def-txt').textContent = txt||'Aguardando...'; if(roomRef){ roomRef.child('pedidos').update({ [side]: txt }); } }
 window.onPedidoInput = onPedidoInput;
+// ═══════════════════════════════════════════════════════
+// FEATURE: PLACAR DE SESSÃO
+// ═══════════════════════════════════════════════════════
+// Persiste só na sessão (sessionStorage) — zera ao fechar
+const sessionScore = { acu: parseInt(sessionStorage.getItem('ss_acu')||'0'), def: parseInt(sessionStorage.getItem('ss_def')||'0') };
+
+function updateSessionScore(winner) {
+  if (winner === 'acusacao') sessionScore.acu++;
+  else if (winner === 'defesa') sessionScore.def++;
+  sessionStorage.setItem('ss_acu', sessionScore.acu);
+  sessionStorage.setItem('ss_def', sessionScore.def);
+  renderSessionScore();
+}
+
+function renderSessionScore() {
+  const el = document.getElementById('session-score-display');
+  if (!el) return;
+  const aName = state.myRole === 'acusacao' ? (state.myName||'Acusação') : (state.partnerName||'Acusação');
+  const dName = state.myRole === 'defesa' ? (state.myName||'Defesa') : (state.partnerName||'Defesa');
+  el.textContent = `${aName} ${sessionScore.acu} × ${sessionScore.def} ${dName}`;
+}
+
+function resetSessionScore() {
+  sessionScore.acu = 0; sessionScore.def = 0;
+  sessionStorage.setItem('ss_acu', '0');
+  sessionStorage.setItem('ss_def', '0');
+  renderSessionScore();
+}
+
+// Injetar placar de sessão no topo do calc tab
+function injectSessionScoreUI() {
+  const calcBody = document.querySelector('#tab-calc .game-body');
+  if (!calcBody || document.getElementById('session-score-card')) return;
+  const card = document.createElement('div');
+  card.id = 'session-score-card';
+  card.className = 'card';
+  card.style.marginBottom = '12px';
+  card.innerHTML = `
+    <div class="section-lbl">// placar da sessão</div>
+    <div style="text-align:center;font-family:var(--serif);font-size:22px;font-weight:700;color:var(--gold2);margin:8px 0;" id="session-score-display">Acusação 0 × 0 Defesa</div>
+    <div style="text-align:center;font-family:var(--mono);font-size:9px;color:var(--text3);">zera ao fechar o app · registre o vencedor no veredito</div>
+    <button onclick="resetSessionScore()" style="width:100%;margin-top:10px;padding:8px;border-radius:8px;border:1px solid var(--b2);background:none;color:var(--text3);font-family:var(--mono);font-size:10px;cursor:pointer;">↺ zerar placar</button>
+  `;
+  calcBody.insertBefore(card, calcBody.firstChild);
+  renderSessionScore();
+}
+window.resetSessionScore = resetSessionScore;
+
+// ═══════════════════════════════════════════════════════
+// FEATURE: CARTA NA MANGA (consultoria privada do Juiz)
+// ═══════════════════════════════════════════════════════
+let cartaNaMangaUsed = false;
+
+function injectCartaNaManga() {
+  const chatInputWrap = document.querySelector('.chat-input-wrap');
+  if (!chatInputWrap || document.getElementById('carta-na-manga-btn')) return;
+  const btn = document.createElement('button');
+  btn.id = 'carta-na-manga-btn';
+  btn.title = '🃏 Carta na Manga — consultoria privada do juiz (1 uso por sessão)';
+  btn.style.cssText = 'margin-bottom:6px;width:100%;padding:8px;border-radius:8px;border:1px solid rgba(122,82,201,.4);background:rgba(122,82,201,.07);color:#9a72e8;font-family:var(--mono);font-size:10px;letter-spacing:.06em;cursor:pointer;transition:all .15s;';
+  btn.textContent = '🃏 CARTA NA MANGA — análise privada do Juiz (1 uso)';
+  btn.onclick = usarCartaNaManga;
+  const artRow = document.getElementById('art-quick-row');
+  if (artRow) chatInputWrap.insertBefore(btn, artRow);
+  else chatInputWrap.insertBefore(btn, chatInputWrap.firstChild);
+}
+
+async function usarCartaNaManga() {
+  if (cartaNaMangaUsed) {
+    showToast('🃏 Carta na manga já usada nessa sessão!');
+    return;
+  }
+  cartaNaMangaUsed = true;
+  const btn = document.getElementById('carta-na-manga-btn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '.4'; btn.textContent = '🃏 CARTA NA MANGA — já usada'; }
+
+  const caseObj = window.CASES?.[state?.caseIdx];
+  const myNotes = document.getElementById('notas-ta')?.value || '';
+  const myRole = state?.myRole || 'acusacao';
+  const systemPrompt = `Você é Dr. Augusto Melo, Juiz experiente em direito penal brasileiro. Esta é uma CONSULTORIA PRIVADA e confidencial — o adversário não verá esta análise. Avalie apenas os argumentos e posição da ${myRole === 'acusacao' ? 'ACUSAÇÃO' : 'DEFESA'}, aponte pontos fortes e fracos, e sugira como fortalecer a posição. Seja direto, específico e estratégico.`;
+  const userPrompt = `CASO: ${caseObj?.titulo || ''}\n${caseObj?.context_juiz || ''}\n\nMinha posição: ${myRole.toUpperCase()}\nMinhas anotações: ${myNotes || '(sem notas)'}\n\nDê-me uma análise privada da minha posição: pontos fortes, vulnerabilidades e 2-3 sugestões táticas para o debate.`;
+
+  // Mostrar resultado no assistente de IA (tab notas)
+  showTab('notas');
+  const notasTabs = document.querySelectorAll('.notas-tab');
+  notasTabs.forEach((t,i)=>t.classList.toggle('active', i===1));
+  document.getElementById('notas-panel-pad')?.classList.remove('active');
+  document.getElementById('notas-panel-ia')?.classList.add('active');
+
+  const msgs = document.getElementById('ia-chat-msgs');
+  if (msgs) {
+    const loading = document.createElement('div');
+    loading.className = 'ia-msg ai';
+    loading.innerHTML = `<div class="ia-msg-who">⚖️ JUIZ (PRIVADO)</div><div>🃏 Analisando sua posição em sigilo...</div>`;
+    msgs.appendChild(loading);
+    msgs.scrollTop = msgs.scrollHeight;
+
+    try {
+      const resp = await fetch('/api/judge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caseObj, messages: [{ sender: 'Sistema', role: 'system', text: userPrompt }], isPrivate: true })
+      });
+      const data = await resp.json();
+      loading.innerHTML = `<div class="ia-msg-who">🃏 JUIZ — CARTA NA MANGA (confidencial)</div><div>${(data.text||'Sem resposta').replace(/\n/g,'<br>')}</div>`;
+    } catch(e) {
+      loading.innerHTML = `<div class="ia-msg-who">⚠️</div><div>Erro ao chamar o juiz. Tente novamente mais tarde.</div>`;
+      cartaNaMangaUsed = false;
+      if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '🃏 CARTA NA MANGA — análise privada do Juiz (1 uso)'; }
+    }
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+window.usarCartaNaManga = usarCartaNaManga;
+
+// ═══════════════════════════════════════════════════════
+// FEATURE: MODO INTERROGATÓRIO
+// ═══════════════════════════════════════════════════════
+let interrogMode = { active: false, round: 0, questioner: null, questions: [] };
+
+function toggleInterrogatorio() {
+  interrogMode.active = !interrogMode.active;
+  const btn = document.getElementById('btn-interrogatorio');
+  if (!btn) return;
+  if (interrogMode.active) {
+    interrogMode.round = 0;
+    interrogMode.questioner = state.myRole;
+    btn.style.borderColor = 'var(--purple)';
+    btn.style.color = 'var(--purple2)';
+    btn.textContent = '⚡ INTERROGATÓRIO ATIVO — 3 perguntas cada';
+    showToast('⚡ Modo Interrogatório ativo! Cada lado faz 3 perguntas diretas.');
+    appendSystemMsg('⚡ MODO INTERROGATÓRIO INICIADO — cada lado faz 3 perguntas. O adversário deve responder diretamente.');
+    if (roomRef) roomRef.child('interrogMode').set({ active: true, startedBy: state.myRole, ts: Date.now() });
+  } else {
+    btn.style.borderColor = 'var(--b2)';
+    btn.style.color = 'var(--text3)';
+    btn.textContent = '⚡ MODO INTERROGATÓRIO';
+    appendSystemMsg('⚡ Modo Interrogatório encerrado — debate livre retomado.');
+    if (roomRef) roomRef.child('interrogMode').set({ active: false });
+  }
+}
+
+function injectInterrogatorioBtn() {
+  const chatInputWrap = document.querySelector('.chat-input-wrap');
+  if (!chatInputWrap || document.getElementById('btn-interrogatorio')) return;
+  const btn = document.createElement('button');
+  btn.id = 'btn-interrogatorio';
+  btn.style.cssText = 'margin-bottom:6px;width:100%;padding:8px;border-radius:8px;border:1px solid var(--b2);background:none;color:var(--text3);font-family:var(--mono);font-size:10px;letter-spacing:.06em;cursor:pointer;transition:all .15s;';
+  btn.textContent = '⚡ MODO INTERROGATÓRIO';
+  btn.onclick = toggleInterrogatorio;
+  const cartaBtn = document.getElementById('carta-na-manga-btn');
+  if (cartaBtn) cartaBtn.parentNode.insertBefore(btn, cartaBtn.nextSibling);
+  else chatInputWrap.insertBefore(btn, chatInputWrap.firstChild);
+}
+
+function appendSystemMsg(text) {
+  const msgs = document.getElementById('chat-messages');
+  if (!msgs) return;
+  const el = document.createElement('div');
+  el.className = 'sys-msg';
+  el.textContent = text;
+  msgs.appendChild(el);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════
+// FEATURE: CASO DA SEMANA (IA gera caso novo)
+// ═══════════════════════════════════════════════════════
+async function gerarCasoDaSemana() {
+  const btn = document.getElementById('btn-caso-semana');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Gerando caso...'; }
+  
+  const themes = ['furto com estado de necessidade', 'homicídio culposo no trânsito', 'estelionato digital', 'violência doméstica', 'crime ambiental', 'tráfico privilegiado', 'injúria racial', 'peculato'];
+  const theme = themes[Math.floor(Math.random() * themes.length)];
+  
+  try {
+    const resp = await fetch('/api/judge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        caseObj: { titulo: 'Gerar caso', context_juiz: '' },
+        messages: [{ sender: 'Sistema', role: 'system', text: `Crie um caso criminal fictício brasileiro sobre ${theme} para debate jurídico. Responda APENAS em JSON com este formato exato: {"titulo":"...","corpo":"...","artigos":["Art. X CP"],"penaMin":N,"penaMax":N,"tese_acu":"...","tese_def":"..."}. O corpo deve ter 2-3 frases descrevendo o fato. Não inclua markdown.` }],
+        isGenerate: true
+      })
+    });
+    const data = await resp.json();
+    let caso;
+    try { caso = JSON.parse(data.text.replace(/```json|```/g,'').trim()); } catch(e) { throw new Error('parse_failed'); }
+    
+    // Inject as a playable case chip
+    const scroll = document.getElementById('case-scroll');
+    if (scroll) {
+      const chip = document.createElement('div');
+      chip.className = 'case-chip';
+      chip.dataset.generatedCase = JSON.stringify(caso);
+      chip.textContent = `⭐ ${caso.titulo}`;
+      chip.onclick = () => {
+        document.querySelectorAll('.case-chip').forEach(c=>c.classList.remove('active'));
+        chip.classList.add('active');
+        // inject into CASES
+        const genCase = {
+          id:'gen', nome:caso.titulo, tags:[{t:'CASO GERADO',c:'tp'}],
+          titulo:caso.titulo, corpo:caso.corpo,
+          hot:['Qual a tese mais forte?','O réu merece pena alternativa?'],
+          penaMin:caso.penaMin||1, penaMax:caso.penaMax||8, penaBase:caso.penaMin||1,
+          agravantes:[], majorantes:[], vade:[], arts_rapidos:caso.artigos||[],
+          context_juiz:`CASO: ${caso.titulo}\n${caso.corpo}`,
+          tese_acu:caso.tese_acu, tese_def:caso.tese_def
+        };
+        if (window.CASES) { window.CASES = window.CASES.filter(c=>c.id!=='gen'); window.CASES.push(genCase); }
+        if (typeof selectCase === 'function') selectCase(window.CASES.length-1);
+        showToast(`✅ Caso "${caso.titulo}" carregado!`);
+      };
+      scroll.appendChild(chip);
+      chip.click();
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '⭐ GERAR CASO DA SEMANA'; }
+  } catch(e) {
+    console.error('gerarCasoDaSemana error:', e);
+    showToast('❌ Erro ao gerar caso. Tente novamente.');
+    if (btn) { btn.disabled = false; btn.textContent = '⭐ GERAR CASO DA SEMANA'; }
+  }
+}
+window.gerarCasoDaSemana = gerarCasoDaSemana;
+
+function injectGerarCasoBtn() {
+  const caseScroll = document.getElementById('case-scroll');
+  if (!caseScroll || document.getElementById('btn-caso-semana')) return;
+  const cardCreate = document.getElementById('card-create');
+  if (!cardCreate) return;
+  const btn = document.createElement('button');
+  btn.id = 'btn-caso-semana';
+  btn.className = 'btn-secondary';
+  btn.style.marginBottom = '12px';
+  btn.textContent = '⭐ GERAR CASO DA SEMANA';
+  btn.onclick = gerarCasoDaSemana;
+  caseScroll.parentNode.insertBefore(btn, caseScroll.nextSibling);
+}
+
+// ═══════════════════════════════════════════════════════
+// FEATURE: MODO ÁRBITRO (3º jogador vota antes do Juiz IA)
+// ═══════════════════════════════════════════════════════
+function injectArbitroUI() {
+  // Inject into verdict tab
+  const verdictWrap = document.getElementById('verdict-wrap');
+  if (!verdictWrap || document.getElementById('arbitro-card')) return;
+  
+  const card = document.createElement('div');
+  card.id = 'arbitro-card';
+  card.className = 'card';
+  card.style.marginBottom = '12px';
+  card.innerHTML = `
+    <div class="section-lbl">// 👥 modo árbitro — voto do público</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6;">Um terceiro pode votar no veredito <em>antes</em> do Juiz IA revelar. Compartilhe o link abaixo:</div>
+    <div id="arbitro-votes" style="display:flex;gap:8px;margin-bottom:12px;">
+      <div style="flex:1;background:var(--red-d);border:1px solid rgba(201,64,64,.2);border-radius:8px;padding:10px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--red2);">⚔️ CONDENAR</div>
+        <div style="font-family:var(--serif);font-size:28px;font-weight:700;color:var(--red2);" id="arb-acu-count">0</div>
+      </div>
+      <div style="flex:1;background:var(--blue-d);border:1px solid rgba(58,110,201,.2);border-radius:8px;padding:10px;text-align:center;">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--blue2);">🛡️ ABSOLVER</div>
+        <div style="font-family:var(--serif);font-size:28px;font-weight:700;color:var(--blue2);" id="arb-def-count">0</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button onclick="votarArbitro('condenar')" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(201,64,64,.3);background:none;color:var(--red2);font-family:var(--mono);font-size:10px;cursor:pointer;">⚔️ Votar CONDENAR</button>
+      <button onclick="votarArbitro('absolver')" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(58,110,201,.3);background:none;color:var(--blue2);font-family:var(--mono);font-size:10px;cursor:pointer;">🛡️ Votar ABSOLVER</button>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--text3);text-align:center;margin-top:8px;" id="arb-my-vote">Você ainda não votou</div>
+  `;
+  verdictWrap.insertBefore(card, verdictWrap.firstChild);
+}
+
+let myArbitroVote = null;
+function votarArbitro(voto) {
+  if (myArbitroVote) { showToast('Você já votou!'); return; }
+  myArbitroVote = voto;
+  const el = document.getElementById('arb-my-vote');
+  if (el) el.textContent = `Seu voto: ${voto === 'condenar' ? '⚔️ CONDENAR' : '🛡️ ABSOLVER'}`;
+  if (roomRef) {
+    const key = `arb_${Date.now()}`;
+    roomRef.child(`arbitro_votes/${key}`).set(voto);
+    roomRef.child('arbitro_votes').on('value', snap => {
+      const votes = snap.val() || {};
+      const arr = Object.values(votes);
+      const cond = arr.filter(v=>v==='condenar').length;
+      const abs = arr.filter(v=>v==='absolver').length;
+      const ca = document.getElementById('arb-acu-count'); if(ca) ca.textContent = cond;
+      const da = document.getElementById('arb-def-count'); if(da) da.textContent = abs;
+    });
+  }
+  showToast(`Voto registrado: ${voto === 'condenar' ? '⚔️' : '🛡️'} ${voto.toUpperCase()}`);
+}
+window.votarArbitro = votarArbitro;
+
+// ═══════════════════════════════════════════════════════
+// HOOK: Injetar tudo quando o jogo lança
+// ═══════════════════════════════════════════════════════
+const _origLaunchGame = window.launchGame;
+window.launchGame = function() {
+  if (_origLaunchGame) _origLaunchGame.apply(this, arguments);
+  setTimeout(() => {
+    injectCartaNaManga();
+    injectInterrogatorioBtn();
+    injectSessionScoreUI();
+    injectArbitroUI();
+    renderSessionScore();
+  }, 600);
+};
+
+// Também injetar no lobby
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(injectGerarCasoBtn, 400);
+});
