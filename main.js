@@ -355,11 +355,20 @@ function appendChatMessage(msg){
   }
   el.innerHTML = header + bubble;
   container.appendChild(el); container.scrollTop = container.scrollHeight;
-  // notificação se não estiver na aba de chat
+  // notificação sonora + visual
   const chatTab = document.querySelector('.btab[data-tab="chat"]');
-  if(chatTab && !chatTab.classList.contains('active') && !isJudge){
+  if(isJudge){
+    playSound('judge');
+  } else if(msg.sender !== state.myName){
+    playSound('message');
+    if(chatTab && !chatTab.classList.contains('active')){
+      const notif = $('chat-notif'); if(notif) notif.classList.add('show');
+    }
+  } else if(chatTab && !chatTab.classList.contains('active') && !isJudge){
     const notif = $('chat-notif'); if(notif) notif.classList.add('show');
   }
+  // reinicia timer quando adversário envia mensagem
+  if(!isJudge && msg.sender !== state.myName){ startTimer(); }
 }
 
 function escapeHtml(s){ return (s||'').replace(/[&<>\"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
@@ -404,7 +413,12 @@ async function applyJudgeScore(text){
 }
 function resetScore(){ if(roomRef){ roomRef.child('scoreAcu').set(0); roomRef.child('scoreDef').set(0); } }
 
-async function sendIaMsg(){ const ta = $('ia-inp'); if(!ta) return; const text = ta.value.trim(); if(!text) return;
+let _iaSending = false;
+async function sendIaMsg(){ 
+  if(_iaSending) return; // evita duplo envio
+  const ta = $('ia-inp'); if(!ta) return; const text = ta.value.trim(); if(!text) return;
+  _iaSending = true;
+  const btn = $('ia-send-btn'); if(btn) btn.disabled = true;
   const moderation = moderateText(text);
   if(moderation.blocked){ showToast(`Mensagem bloqueada por moderação local: ${moderation.word}`); return; }
   ta.value='';
@@ -422,6 +436,7 @@ Regras: ajude o jogador a PENSAR, não escreva os argumentos por ele. Faça perg
     const reply = { sender:'Assistente', text: resp || 'Não foi possível obter resposta no momento.', ts: Date.now(), type:'ai' };
     if(roomRef){ await roomRef.child(iaChannel).push(reply); } else { appendIaMessage(reply); }
   }catch(e){ console.warn('assist fail', e); const errMsg = { sender:'Assistente', text:'Falha ao consultar o assistente IA. Tente novamente.', ts: Date.now(), type:'ai' }; if(roomRef){ await roomRef.child(iaChannel).push(errMsg); } else { appendIaMessage(errMsg); } }
+  finally{ _iaSending = false; const btn2 = $('ia-send-btn'); if(btn2) btn2.disabled = false; }
 }
 
 // pills do chat do debate — manda direto pro chat geral (não pro assistente IA)
@@ -663,6 +678,9 @@ function launchGame(){
   const badge = $('gtb-badge');
   if(badge) badge.className = `gtb-badge ${state.myRole}`;
 
+  // Inicia timer
+  setTimeout(startTimer, 800);
+
   // Travar campo de pena do adversário — cada lado só edita o próprio
   const acuInp = $('pena-acu');
   const defInp = $('pena-def');
@@ -685,6 +703,128 @@ function selectCase(i){ if(window.CASES){ state.caseIdx = i; document.querySelec
 function selectRole(r){ state.createRole = r; document.getElementById('rc-acu')?.classList.toggle('sel', r==='acusacao'); document.getElementById('rc-def')?.classList.toggle('sel', r==='defesa'); }
 
 function selectJoinRole(r){ state.joinRole = r; document.getElementById('rj-acu')?.classList.toggle('sel', r==='acusacao'); document.getElementById('rj-def')?.classList.toggle('sel', r==='defesa'); }
+
+
+// ══════════════════════════════════════════════════════
+// TIMER POR RODADA
+// ══════════════════════════════════════════════════════
+const TIMER_DURATION = 90; // segundos por rodada
+let timerSeconds = TIMER_DURATION;
+let timerInterval = null;
+let timerRunning = false;
+let timerPaused = false;
+
+function startTimer(){
+  timerSeconds = TIMER_DURATION;
+  timerRunning = true;
+  timerPaused = false;
+  const wrap = $('timer-bar-wrap');
+  if(wrap) wrap.classList.add('active');
+  updateTimerUI();
+  clearInterval(timerInterval);
+  timerInterval = setInterval(tickTimer, 1000);
+}
+
+function tickTimer(){
+  if(timerPaused) return;
+  timerSeconds--;
+  updateTimerUI();
+  if(timerSeconds <= 0){
+    clearInterval(timerInterval);
+    timerRunning = false;
+    playSound('timeout');
+    showToast('⏱ Tempo esgotado! Vez do adversário.');
+    const count = $('timer-count');
+    if(count){ count.textContent = '0'; count.classList.add('urgent'); }
+  } else if(timerSeconds <= 15){
+    playSound('tick');
+  }
+}
+
+function updateTimerUI(){
+  const count = $('timer-count');
+  const fill = $('timer-bar-fill');
+  const label = $('timer-label');
+  if(count){
+    count.textContent = timerSeconds;
+    count.classList.toggle('urgent', timerSeconds <= 15);
+  }
+  if(fill){
+    const pct = (timerSeconds / TIMER_DURATION) * 100;
+    fill.style.width = pct + '%';
+    if(timerSeconds <= 15) fill.style.background = 'var(--red2)';
+    else if(timerSeconds <= 30) fill.style.background = 'var(--gold)';
+    else fill.style.background = 'var(--green2)';
+  }
+  if(label && timerPaused) label.textContent = '⏸ pausado';
+  else if(label) label.textContent = '⏱ tempo restante';
+}
+
+function toggleTimer(){
+  if(!timerRunning) { startTimer(); return; }
+  timerPaused = !timerPaused;
+  const btn = document.querySelector('.timer-btn');
+  if(btn) btn.textContent = timerPaused ? '▶' : '⏸';
+  updateTimerUI();
+}
+
+window.toggleTimer = toggleTimer;
+window.startTimer = startTimer;
+
+// ══════════════════════════════════════════════════════
+// NOTIFICAÇÕES SONORAS (Web Audio API — sem arquivos)
+// ══════════════════════════════════════════════════════
+let _audioCtx = null;
+function getAudioCtx(){
+  if(!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return _audioCtx;
+}
+
+function playSound(type){
+  try{
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    if(type === 'message'){
+      // Notinha suave — mensagem chegou
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.2);
+    } else if(type === 'judge'){
+      // Som mais solene — juiz falou
+      osc.frequency.setValueAtTime(440, ctx.currentTime);
+      osc.frequency.setValueAtTime(554, ctx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(659, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } else if(type === 'tick'){
+      // Tick urgente — menos de 15s
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.08);
+    } else if(type === 'timeout'){
+      // Buzzer — acabou o tempo
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.6);
+    }
+  }catch(e){ /* silencia erros de audio */ }
+}
+
+window.playSound = playSound;
 
 // expose helpers to global scope for inline handlers
 window.createRoom = createRoom; window.joinRoom = joinRoom; window.startAnySolo = startAnySolo; window.sendMessage = sendMessage; window.addScore = addScore; window.resetScore = resetScore; window.requestJudge = requestJudge; window.launchGame = launchGame; window.selectCase = selectCase; window.selectRole = selectRole; window.selectJoinRole = selectJoinRole; window.initLobby = initLobby; window.selectJudgeQuestion = selectJudgeQuestion; window.clearJudgeQuestionSelection = clearJudgeQuestionSelection; window.submitJudgeAnswer = submitJudgeAnswer; window.toggleArtCard = toggleArtCard; window.submitRecurso = submitRecurso;
