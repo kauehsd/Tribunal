@@ -274,8 +274,11 @@ function updateWaitingUI(){ const list = $('players-list'); const myLbl = state.
 
 function startAnySolo(){ state.solo=true; state.partnerName='Parceiro'; state.partnerRole = state.myRole==='acusacao'?'defesa':'acusacao'; if(roomRef) roomRef.off(); launchGame(); }
 
+let _listenersActive = false;
 function setupRealtimeListeners(){
-  if(!roomRef) return; 
+  if(!roomRef) return;
+  if(_listenersActive){ console.warn("setupRealtimeListeners already active, skipping"); return; }
+  _listenersActive = true;
   // chat
   const chatRef = roomRef.child('chat');
   chatRef.on('child_added', snap => {
@@ -367,8 +370,6 @@ function appendChatMessage(msg){
   } else if(chatTab && !chatTab.classList.contains('active') && !isJudge){
     const notif = $('chat-notif'); if(notif) notif.classList.add('show');
   }
-  // reinicia timer quando adversário envia mensagem
-  if(!isJudge && msg.sender !== state.myName){ startTimer(); }
 }
 
 function escapeHtml(s){ return (s||'').replace(/[&<>\"]/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c])); }
@@ -678,9 +679,6 @@ function launchGame(){
   const badge = $('gtb-badge');
   if(badge) badge.className = `gtb-badge ${state.myRole}`;
 
-  // Inicia timer
-  setTimeout(startTimer, 800);
-
   // Travar campo de pena do adversário — cada lado só edita o próprio
   const acuInp = $('pena-acu');
   const defInp = $('pena-def');
@@ -705,71 +703,6 @@ function selectRole(r){ state.createRole = r; document.getElementById('rc-acu')?
 function selectJoinRole(r){ state.joinRole = r; document.getElementById('rj-acu')?.classList.toggle('sel', r==='acusacao'); document.getElementById('rj-def')?.classList.toggle('sel', r==='defesa'); }
 
 
-// ══════════════════════════════════════════════════════
-// TIMER POR RODADA
-// ══════════════════════════════════════════════════════
-const TIMER_DURATION = 90; // segundos por rodada
-let timerSeconds = TIMER_DURATION;
-let timerInterval = null;
-let timerRunning = false;
-let timerPaused = false;
-
-function startTimer(){
-  timerSeconds = TIMER_DURATION;
-  timerRunning = true;
-  timerPaused = false;
-  const wrap = $('timer-bar-wrap');
-  if(wrap) wrap.classList.add('active');
-  updateTimerUI();
-  clearInterval(timerInterval);
-  timerInterval = setInterval(tickTimer, 1000);
-}
-
-function tickTimer(){
-  if(timerPaused) return;
-  timerSeconds--;
-  updateTimerUI();
-  if(timerSeconds <= 0){
-    clearInterval(timerInterval);
-    timerRunning = false;
-    playSound('timeout');
-    showToast('⏱ Tempo esgotado! Vez do adversário.');
-    const count = $('timer-count');
-    if(count){ count.textContent = '0'; count.classList.add('urgent'); }
-  } else if(timerSeconds <= 15){
-    playSound('tick');
-  }
-}
-
-function updateTimerUI(){
-  const count = $('timer-count');
-  const fill = $('timer-bar-fill');
-  const label = $('timer-label');
-  if(count){
-    count.textContent = timerSeconds;
-    count.classList.toggle('urgent', timerSeconds <= 15);
-  }
-  if(fill){
-    const pct = (timerSeconds / TIMER_DURATION) * 100;
-    fill.style.width = pct + '%';
-    if(timerSeconds <= 15) fill.style.background = 'var(--red2)';
-    else if(timerSeconds <= 30) fill.style.background = 'var(--gold)';
-    else fill.style.background = 'var(--green2)';
-  }
-  if(label && timerPaused) label.textContent = '⏸ pausado';
-  else if(label) label.textContent = '⏱ tempo restante';
-}
-
-function toggleTimer(){
-  if(!timerRunning) { startTimer(); return; }
-  timerPaused = !timerPaused;
-  const btn = document.querySelector('.timer-btn');
-  if(btn) btn.textContent = timerPaused ? '▶' : '⏸';
-  updateTimerUI();
-}
-
-window.toggleTimer = toggleTimer;
-window.startTimer = startTimer;
 
 // ══════════════════════════════════════════════════════
 // NOTIFICAÇÕES SONORAS (Web Audio API — sem arquivos)
@@ -836,6 +769,7 @@ window.addEventListener('DOMContentLoaded', ()=>{ initUI(); initFirebase(); });
 function backToLobby(){
   document.getElementById('s-game').classList.remove('active'); document.getElementById('s-lobby').classList.add('active');
   if(roomRef) { roomRef.off(); roomRef = null; }
+  _listenersActive = false;
 }
 
 function showTab(tab){ 
