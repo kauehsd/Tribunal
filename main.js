@@ -282,7 +282,7 @@ function setupRealtimeListeners(){
   // chat
   const chatRef = roomRef.child('chat');
   chatRef.on('child_added', snap => {
-    const msg = snap.val(); if(!msg) return; appendChatMessage(msg);
+    const msg = snap.val(); if(!msg) return; appendChatMessage(msg, snap.key);
     // se houver perguntas pendentes do juiz e mensagem de usuário, agendar re-análise
     try{
       if(msg.type === 'chat' && msg.sender && msg.sender !== 'Juiz'){
@@ -295,8 +295,8 @@ function setupRealtimeListeners(){
   roomRef.child('judge_answers').on('value', s => { judgeAnswers = s.val() || {}; renderJudgeQuestions(); });
   roomRef.child('judge_pending').on('value', s => { const pending = s.val(); const badge = $('veredito-notif'); if(badge){ badge.classList.toggle('show', Boolean(pending)); } });
   // score
-  roomRef.child('scoreAcu').on('value', s => { const v = s.val(); if(v!==null) $('sc-acu').textContent = v; });
-  roomRef.child('scoreDef').on('value', s => { const v = s.val(); if(v!==null) $('sc-def').textContent = v; });
+  roomRef.child('scoreAcu').on('value', s => { const v = s.val(); if(v!==null){ $('sc-acu').textContent = v; updateScoreLabels(); } });
+  roomRef.child('scoreDef').on('value', s => { const v = s.val(); if(v!==null){ $('sc-def').textContent = v; updateScoreLabels(); } });
   // notes
   roomRef.child('notes').on('value', s => { const v = s.val(); if(v!==null){ const ta = $('notas-ta'); if(ta) ta.value = v; updateNotasCount(); } });
   // IA assistant chat — privado por jogador (cada um tem seu canal)
@@ -331,10 +331,10 @@ function setupRealtimeListeners(){
   presenceRef.onDisconnect().remove();
 }
 
-function appendChatMessage(msg){
+function appendChatMessage(msg, firebaseKey){
   const container = $('chat-messages'); if(!container) return;
-  // evitar duplicatas por ts+sender
-  const msgId = `${msg.ts}-${msg.sender}`;
+  // deduplicação robusta: prioriza a chave do Firebase, fallback para ts+sender
+  const msgId = firebaseKey || `${msg.ts}-${msg.sender}-${(msg.text||'').slice(0,20)}`;
   if(container.querySelector(`[data-msgid="${msgId}"]`)) return;
   const el = document.createElement('div'); el.className = 'msg'; el.dataset.msgid = msgId;
   const isJudge = msg.type==='judge' || msg.role==='juiz';
@@ -392,6 +392,14 @@ async function sendMessage(){
     msgCountSinceJudge = 0;
     setTimeout(()=>requestJudge(), 600);
   }
+}
+
+// Atualiza labels do placar com nomes dos jogadores
+function updateScoreLabels(){
+  const acuName = state.myRole === 'acusacao' ? state.myName : state.partnerName;
+  const defName = state.myRole === 'defesa' ? state.myName : state.partnerName;
+  const lblAcu = $('sc-acu-label'); if(lblAcu && acuName) lblAcu.textContent = acuName;
+  const lblDef = $('sc-def-label'); if(lblDef && defName) lblDef.textContent = defName;
 }
 
 async function addScore(side){ if(!roomRef) return; if(side==='acu') roomRef.child('scoreAcu').transaction(v=> (v||0)+1); else roomRef.child('scoreDef').transaction(v=> (v||0)+1); }
@@ -676,6 +684,7 @@ function launchGame(){
   renderVerdict(null);
   $('gtb-title').textContent = `Sala ${state.roomCode} • ${caseObj?caseObj.nome:''}`;
   $('gtb-role-txt').textContent = state.myRole==='acusacao'?'ACUSAÇÃO':'DEFESA';
+  updateScoreLabels();
   const badge = $('gtb-badge');
   if(badge) badge.className = `gtb-badge ${state.myRole}`;
 
@@ -763,7 +772,7 @@ window.playSound = playSound;
 window.createRoom = createRoom; window.joinRoom = joinRoom; window.startAnySolo = startAnySolo; window.sendMessage = sendMessage; window.addScore = addScore; window.resetScore = resetScore; window.requestJudge = requestJudge; window.launchGame = launchGame; window.selectCase = selectCase; window.selectRole = selectRole; window.selectJoinRole = selectJoinRole; window.initLobby = initLobby; window.selectJudgeQuestion = selectJudgeQuestion; window.clearJudgeQuestionSelection = clearJudgeQuestionSelection; window.submitJudgeAnswer = submitJudgeAnswer; window.toggleArtCard = toggleArtCard; window.submitRecurso = submitRecurso;
 
 // init on DOM ready
-window.addEventListener('DOMContentLoaded', ()=>{ initUI(); initFirebase(); });
+window.addEventListener('DOMContentLoaded', ()=>{ initUI(); });
 
 // Additional global handlers expected by inline HTML
 function backToLobby(){
