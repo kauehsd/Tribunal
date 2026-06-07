@@ -400,8 +400,14 @@ async function sendMessage(){
 function updateScoreLabels(){
   const acuName = state.myRole === 'acusacao' ? state.myName : state.partnerName;
   const defName = state.myRole === 'defesa' ? state.myName : state.partnerName;
-  const lblAcu = $('sc-acu-label'); if(lblAcu && acuName) lblAcu.textContent = acuName;
-  const lblDef = $('sc-def-label'); if(lblDef && defName) lblDef.textContent = defName;
+  // substitui o título fixo pelo nome real
+  const lblAcu = $('sc-acu-label');
+  if(lblAcu && acuName) lblAcu.textContent = `⚔️ ${acuName}`;
+  const lblDef = $('sc-def-label');
+  if(lblDef && defName) lblDef.textContent = `🛡️ ${defName}`;
+  // esconde os títulos genéricos fixos
+  const fixAcu = $('sc-acu-fixed'); if(fixAcu) fixAcu.style.display = 'none';
+  const fixDef = $('sc-def-fixed'); if(fixDef) fixDef.style.display = 'none';
 }
 
 async function addScore(side){ if(!roomRef) return; if(side==='acu') roomRef.child('scoreAcu').transaction(v=> (v||0)+1); else roomRef.child('scoreDef').transaction(v=> (v||0)+1); }
@@ -479,10 +485,17 @@ async function requestJudge(){
       const result = await window.askJudge(caseObjComPedidos, msgs);
       const answer = (result && typeof result === 'object') ? (result.text || '') : result;
       const provider = (result && result.provider) ? result.provider : undefined;
+      const localScore = result && result.localScore;
       if(roomRef){
         await roomRef.child('chat').push({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge', ...(provider && {provider}) });
         await roomRef.child('verdict').set({ text: answer, ts: Date.now() });
-        await applyJudgeScore(answer);
+        // se veio do local, aplica o score direto; senão tenta extrair do texto da IA
+        if(localScore){
+          await roomRef.child('scoreAcu').set(localScore.acusacao);
+          await roomRef.child('scoreDef').set(localScore.defesa);
+        } else {
+          await applyJudgeScore(answer);
+        }
       } else {
         appendChatMessage({ sender:'Juiz', role:'juiz', text:answer, ts:Date.now(), type:'judge', ...(provider && {provider}) });
       }

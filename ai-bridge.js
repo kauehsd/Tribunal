@@ -10,7 +10,7 @@ async function tryFallbackAIs(caseObj, messages){
 
   // fallback local (offline)
   const local = LocalJudge.generateIntervention(caseObj, messages);
-  return { text: `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`, provider: 'local' };
+  return { text: local.text, provider: 'local', localScore: local.score };
 }
 
 export async function askJudge(caseObj, messages){
