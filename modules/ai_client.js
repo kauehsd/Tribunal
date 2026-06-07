@@ -4,15 +4,21 @@
 
 const RENDER_URL = 'https://tribunal-do-casal-api.onrender.com';
 
+function fetchWithTimeout(url, options, ms = 6000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timer));
+}
+
 export async function askProxy(caseObj, messages) {
-  const r = await fetch(`${RENDER_URL}/api/judge`, {
+  const r = await fetchWithTimeout(`${RENDER_URL}/api/judge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ caseObj, messages })
-  });
+  }, 6000);
   if (!r.ok) throw new Error('proxy_failed');
   const data = await r.json();
-  // Retorna objeto com text e provider para exibir badge
   return { text: data.text || null, provider: data.provider || null };
 }
 
