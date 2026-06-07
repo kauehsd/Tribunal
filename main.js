@@ -277,7 +277,7 @@ function startAnySolo(){ state.solo=true; state.partnerName='Parceiro'; state.pa
 let _listenersActive = false;
 function setupRealtimeListeners(){
   if(!roomRef) return;
-  if(_listenersActive){ console.warn("setupRealtimeListeners already active, skipping"); return; }
+  if(_listenersActive){ return; }
   _listenersActive = true;
   // chat
   const chatRef = roomRef.child('chat');
@@ -781,6 +781,7 @@ function backToLobby(){
   document.getElementById('s-game').classList.remove('active'); document.getElementById('s-lobby').classList.add('active');
   if(roomRef) { roomRef.off(); roomRef = null; }
   _listenersActive = false;
+  _renderedMsgIds.clear();
 }
 
 function showTab(tab){ 

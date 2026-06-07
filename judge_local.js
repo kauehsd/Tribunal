@@ -421,6 +421,14 @@ export const LocalJudge = (function () {
     return 'balanced';
   }
 
+  // ─── EXTRAI TRECHO RELEVANTE DA MENSAGEM ─────────────────────────────────
+
+  function extrairTrecho(text, maxLen = 60) {
+    if (!text) return '';
+    const clean = text.replace(/\s+/g, ' ').trim();
+    return clean.length > maxLen ? `"${clean.slice(0, maxLen)}..."` : `"${clean}"`;
+  }
+
   // ─── INTERVENÇÃO DO JUIZ ──────────────────────────────────────────────────
 
   function generateIntervention(caseObj, messages) {
@@ -430,42 +438,49 @@ export const LocalJudge = (function () {
     const recentText = recent.map(m => m.text || '').join(' ');
     const allText = (messages || []).map(m => m.text || '').join(' ');
     const tesesRecentes = detectarTeses(recentText);
-    const lastRole = recent.length ? recent[recent.length - 1].role : null;
-    const lastMsg = recent.length ? (recent[recent.length - 1].text || '') : '';
+    const lastMsg = recent.length ? recent[recent.length - 1] : null;
+    const lastRole = lastMsg ? lastMsg.role : null;
+    const lastText = lastMsg ? (lastMsg.text || '') : '';
+    const lastSender = lastMsg ? (lastMsg.sender || (lastRole === 'acusacao' ? 'Acusação' : 'Defesa')) : '';
     const tipoCaso = detectarCaso(caseObj);
     const pergs = PERGUNTAS[tipoCaso] || PERGUNTAS.default;
     const haContradicao = detectarContradicao(messages);
     const pergIdx = Math.floor((messages || []).length / 2) % pergs.length;
     const pergunta = pergs[pergIdx];
+    const trecho = extrairTrecho(lastText);
 
     let text = '';
 
-    // 1. Contradição detectada
+    // 1. Contradição detectada — cita os dois lados
     if (haContradicao) {
-      text = `⚖️ ${pick(FALAS.contradicao)} — ${pergunta}`;
+      const acuMsg = (messages || []).filter(m => m.role === 'acusacao').slice(-1)[0];
+      const defMsg = (messages || []).filter(m => m.role === 'defesa').slice(-1)[0];
+      const trechoAcu = extrairTrecho(acuMsg?.text, 50);
+      const trechoDef = extrairTrecho(defMsg?.text, 50);
+      text = `⚖️ ${pick(FALAS.contradicao)}\nAcusação afirma ${trechoAcu} enquanto Defesa sustenta ${trechoDef}. Esclareçam essa contradição com provas.\n→ ${pergunta}`;
     }
-    // 2. Argumento muito curto
-    else if (lastMsg.length < 20 && lastRole) {
-      text = `⚖️ ${pick(FALAS.muito_curto)} — ${pergunta}`;
+    // 2. Argumento muito curto — menciona quem foi
+    else if (lastText.length < 20 && lastRole) {
+      text = `⚖️ ${lastSender}, ${pick(FALAS.muito_curto).toLowerCase()} ${trecho ? `— o argumento ${trecho} precisa ser desenvolvido.` : ''}\n→ ${pergunta}`;
     }
-    // 3. Tese específica detectada
+    // 3. Tese específica detectada — responde à tese citando o trecho
     else if (tesesRecentes.length && lastRole) {
       const tese = TESES[tesesRecentes[0]];
       const resp = lastRole === 'defesa' ? tese.def : tese.acu;
-      text = `⚖️ Juiz: ${resp} [${tese.art}] — ${pergunta}`;
+      text = `⚖️ ${lastSender} invocou ${tese.art}${trecho ? ` ao afirmar ${trecho}` : ''}.\n${resp}\n→ ${pergunta}`;
     }
-    // 4. Falta de artigos
+    // 4. Falta de artigos — menciona quem não citou
     else if (!(allText.match(/art\.?\s?\d+/gi) || []).length) {
-      text = `⚖️ ${pick(FALAS.sem_artigos)} — ${pergunta}`;
+      text = `⚖️ ${pick(FALAS.sem_artigos)}\nNenhuma das partes citou dispositivo legal até agora. Fundamente com artigos do Código Penal.\n→ ${pergunta}`;
     }
-    // 5. Baseado no placar
+    // 5. Baseado no placar — com referência ao último argumento
     else {
       if (tone === 'acusacao') {
-        text = `⚖️ ${pick(FALAS.tese_forte_acu)} — À defesa: ${pergunta}`;
+        text = `⚖️ ${pick(FALAS.tese_forte_acu)}${trecho ? `\nA Defesa afirmou ${trecho} — isso precisa ser rebatido com prova objetiva.` : ''}\n→ ${pergunta}`;
       } else if (tone === 'defesa') {
-        text = `⚖️ ${pick(FALAS.tese_forte_def)} — À acusação: ${pergunta}`;
+        text = `⚖️ ${pick(FALAS.tese_forte_def)}${trecho ? `\nA Acusação afirmou ${trecho} — a Defesa deve criar dúvida razoável sobre isso.` : ''}\n→ ${pergunta}`;
       } else {
-        text = `⚖️ ${pick(FALAS.equilibrado)} — ${pergunta}`;
+        text = `⚖️ ${pick(FALAS.equilibrado)}${trecho ? `\nÚltimo argumento: ${trecho}.` : ''}\n→ ${pergunta}`;
       }
     }
 
