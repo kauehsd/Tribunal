@@ -331,11 +331,13 @@ function setupRealtimeListeners(){
   presenceRef.onDisconnect().remove();
 }
 
+const _renderedMsgIds = new Set();
+
 function appendChatMessage(msg, firebaseKey){
   const container = $('chat-messages'); if(!container) return;
-  // deduplicação robusta: prioriza a chave do Firebase, fallback para ts+sender
   const msgId = firebaseKey || `${msg.ts}-${msg.sender}-${(msg.text||'').slice(0,20)}`;
-  if(container.querySelector(`[data-msgid="${msgId}"]`)) return;
+  if(_renderedMsgIds.has(msgId)) return;
+  _renderedMsgIds.add(msgId);
   const el = document.createElement('div'); el.className = 'msg'; el.dataset.msgid = msgId;
   const isJudge = msg.type==='judge' || msg.role==='juiz';
   if(isJudge) el.classList.add('judge');
