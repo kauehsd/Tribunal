@@ -232,6 +232,15 @@ small{font-size:12px;}
 .fb span{display:block;font-size:11.5px;font-weight:700;color:var(--ink3);}
 .fb span b{color:var(--ok);}
 .fb.acusacao{border-left-color:var(--acu);} .fb.defesa{border-left-color:var(--def);}
+.qo-btn{display:block;margin-top:8px;margin-left:auto;font-size:12px;font-weight:700;color:var(--ink2);background:var(--card);border-radius:99px;padding:6px 11px;box-shadow:inset 0 0 0 1.5px var(--line2);}
+.qo-btn:active{background:var(--bg2);}
+.qo-btn[hidden]{display:none;}
+.b-body del,.j-quote del{text-decoration:line-through;text-decoration-color:var(--bad);text-decoration-thickness:2px;opacity:.6;}
+.j-quote small{display:block;font-style:normal;color:var(--ink3);margin-top:3px;}
+.penalty{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+.penalty span{font-size:12.5px;font-weight:800;border-radius:99px;padding:4px 10px;}
+.penalty .acusacao{background:var(--acu-soft);color:var(--acu-ink);} .penalty .defesa{background:var(--def-soft);color:var(--def-ink);}
+.qo-quote{max-height:160px;overflow:auto;font-size:14px;margin-bottom:10px;}
 .ruling{align-self:center;font-size:12.5px;color:var(--ink2);background:var(--card2);border-radius:12px;padding:7px 11px;max-width:92%;text-align:center;}
 .v-dec{font-family:var(--display);font-weight:800;font-size:28px;letter-spacing:-.02em;text-align:center;margin:12px 0 4px;}
 .v-dec small{display:block;font-family:var(--sans);font-size:13px;color:var(--ink3);font-weight:600;letter-spacing:0;}

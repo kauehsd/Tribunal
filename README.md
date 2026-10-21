@@ -14,7 +14,7 @@ Ele abre em tela cheia, como um app, e a tela não apaga durante a partida.
 
 ## Como é uma partida
 
-Ninguém escolhe o caso: ele é **sorteado** quando os dois entram, junto com os papéis (cara ou coroa). O jogo guarda o histórico de cada casal e **nunca repete caso**. Primeiro saem os casos prontos que vocês ainda não jogaram; depois disso, **a IA escreve um caso inédito** a cada partida, com crime, provas, testemunhas, contradições e reviravoltas novas. A cada caso, os papéis se invertem.
+Ninguém escolhe o caso: ele é **sorteado** quando os dois entram, junto com os papéis (cara ou coroa). O jogo guarda o histórico de cada casal e **nunca repete caso**. Só entram crimes graves (pena máxima de 10 anos ou mais). Primeiro saem os casos prontos que vocês ainda não jogaram; depois disso, **a IA escreve um caso inédito** a cada partida, com crime, provas, testemunhas, contradições e reviravoltas novas. A cada caso, os papéis se invertem.
 
 O processo segue o rito real, em fases:
 
@@ -28,6 +28,13 @@ O processo segue o rito real, em fases:
 | ⚖️ **Julgamento** | Sentença com dosimetria. No Júri, **7 jurados** com perfis diferentes votam, cada um com o que pensou. |
 | 🏛️ **Recurso** | Quem perdeu pode apelar. Três desembargadores votam: uma garantista, um linha-dura e um técnico. |
 | 🏁 **Fim** | Placar, conquistas, XP e carreira. O próximo caso começa com os **papéis trocados**. |
+
+**Só vale o que está nos autos.** Toda peça (denúncia, resposta, alegações, recurso) passa pelo juiz antes de valer:
+- **Fato inventado** (algo que não está no caso, nas provas nem nos depoimentos): o trecho é riscado e desconsiderado; quem inventou perde pontos e o adversário ganha. A punição sobe a cada reincidência (−2, −3, e na 3ª vez litigância de má-fé, −5).
+- **Acusar alguém de crime sem prova** (ex.: "o advogado subornou a testemunha"): volta contra quem acusou (−4, +2 para o outro).
+- Argumentos, interpretações, hipóteses, exageros retóricos e os segredos verdadeiros do seu lado **não** são punidos.
+- **Questão de ordem**: se o adversário afirmar algo sem base, toque em "Questão de ordem" na peça dele. Se proceder: +2 para você e −2 para ele; se não proceder: −1 para você (3 por caso).
+- Trechos desconsiderados são apagados antes de o juiz, os jurados e os desembargadores lerem o processo, ou seja, inventar nunca ganha o caso.
 
 Outras mecânicas:
 - **Informação secreta**: cada lado vê algo que o outro não sabe (aba CASO).
@@ -72,6 +79,15 @@ No Vercel: **Settings → Environment Variables**, tipo *Segredo*, com o nome ex
 **Diagnóstico:** abra `https://tribunal-eta.vercel.app/api/judge?diag=1` para testar cada IA de verdade e ver qual responde. Se um modelo for desativado pelo provedor, troque-o sem mexer no código com `GROQ_MODEL`, `GEMINI_MODEL`, `CEREBRAS_MODEL` ou `OPENROUTER_MODEL`.
 
 > Nunca coloque chave no código nem no GitHub.
+
+## Segurança do banco (Firebase)
+
+O arquivo `database.rules.json` tem as regras que protegem o banco: ninguém consegue listar todas as salas, apagar o banco inteiro ou apagar uma sala ativa (só salas com mais de 7 dias podem ser removidas). O jogo continua funcionando normalmente.
+
+Para aplicar:
+1. Abra https://console.firebase.google.com e entre no projeto **tribunal-do-casual**
+2. Menu **Realtime Database** → aba **Regras**
+3. Apague o que estiver lá, cole o conteúdo de `database.rules.json` e clique em **Publicar**
 
 ## Rodando no computador
 

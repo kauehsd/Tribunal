@@ -1,6 +1,6 @@
 // main.js — lobby, sessão, navegação, notas e assistente. O processo em si fica em modules/game.js.
 import { ask } from './ai-bridge.js';
-import { G, render, tick, assistContext, countAssistUse, roleOf, newEvidence, openSheet, closeSheet } from './modules/game.js';
+import { G, render, tick, assistContext, countAssistUse, roleOf, newEvidence, openSheet, closeSheet, actions } from './modules/game.js';
 import { renderCase, renderNewEvidence } from './modules/case_view.js';
 import { NIVEIS_JOGO, loadCareers, careerCardHtml } from './modules/career.js';
 import { $, escapeHtml, toast, ROLE_LABEL, otherRole, autoGrow, moderate, playSound, initGlossaryPopover, slug } from './modules/util.js';
@@ -113,8 +113,12 @@ async function joinRoom(){
     const room = (await ref.once('value')).val();
     if(!room){ toast('Sala não encontrada'); return; }
     rememberName(name);
-    // quem já está na sala com esse nome volta para ela (ex.: recarregou a página)
-    if(room.lobby?.[slug(name)]){ await enterRoom(code, name); return; }
+    // quem já está na sala com esse nome volta para ela (ex.: recarregou a página ou trocou de aparelho).
+    // Mas se só o criador está na sala, um nome igual é outra pessoa: não deixa tomar o lugar dele.
+    if(room.lobby?.[slug(name)]){
+      if(Object.keys(room.lobby).length < 2 && !room.solo){ toast('Esse nome já está na sala. Use outro nome.'); return; }
+      await enterRoom(code, name); return;
+    }
     if(room.solo){ toast('Essa sala está no modo treino (contra a IA)'); return; }
     const tx = await ref.child('lobby').transaction(l => {
       l = l || {};
@@ -309,6 +313,28 @@ function openInfo(){
 }
 function closeInfo(){ $('info-sheet').classList.remove('open'); if(!$('sheet').classList.contains('open')) document.body.classList.remove('sheet-open'); }
 
+// ── "Questão de ordem": impugnar algo que o adversário afirmou sem base nos autos ──
+function openQuestaoDeOrdem(key){
+  const a = G.room?.autos?.[key]; if(!a) return;
+  const restantes = 3 - (G.room.impugnacoes?.[G.me.role] || 0);
+  $('info-body').innerHTML = `
+    <div class="sh-title">Questão de ordem</div>
+    <div class="sh-hint">Aponte o que ${escapeHtml(a.por === 'acusacao' ? 'a Acusação' : 'a Defesa')} afirmou <b>sem base nos autos</b> (um fato inventado, uma acusação sem prova). O juiz confere. Se proceder: <b>+2</b> para você e <b>−2</b> para o adversário. Se não proceder: <b>−1</b> para você.</div>
+    <div class="offer qo-quote">${escapeHtml(a.texto).replace(/\n/g, '<br>')}</div>
+    <textarea class="field" id="qo-text" rows="3" placeholder='Ex.: "Ela disse que o réu confessou no corredor, mas isso não aparece em nenhuma prova nem depoimento."'></textarea>
+    <div class="row"><button class="btn btn-secondary" type="button" data-close-sheet>Cancelar</button><button class="btn btn-primary" type="button" id="qo-send">Levantar questão</button></div>
+    <div class="sh-foot">Restam ${restantes} questões de ordem neste caso.</div>`;
+  $('info-body').querySelector('[data-close-sheet]').addEventListener('click', closeInfo);
+  $('qo-send').addEventListener('click', async e => {
+    const b = e.currentTarget; b.disabled = true; b.classList.add('loading');
+    try{ if(await actions.questaoDeOrdem(key, $('qo-text').value.trim())) closeInfo(); }
+    finally{ b.disabled = false; b.classList.remove('loading'); }
+  });
+  $('info-sheet').classList.add('open');
+  document.body.classList.add('sheet-open');
+  setTimeout(() => $('qo-text')?.focus({ preventScroll: true }), 260);
+}
+
 // ── Notas (privadas: ficam só neste aparelho) ──
 function notasKey(){ return `tribunal_notas_${G.code}_${G.me.role}_${G.room?.round || 0}`; }
 function loadNotas(){ const ta = $('notas-ta'); if(!ta) return; try{ ta.value = localStorage.getItem(notasKey()) || ''; }catch(e){} }
@@ -384,6 +410,7 @@ function initUI(){
   $('sheet-backdrop')?.addEventListener('click', () => { closeSheet(); closeInfo(); });
   document.querySelectorAll('[data-close-sheet]').forEach(b => b.addEventListener('click', () => { closeSheet(); closeInfo(); }));
   $('btn-autos')?.addEventListener('click', openInfo);
+  $('autos')?.addEventListener('click', e => { const b = e.target.closest('.qo-btn'); if(b && !b.hidden) openQuestaoDeOrdem(b.dataset.qo); });
   $('career-modal')?.addEventListener('click', e => { if(e.target.id === 'career-modal' || e.target.closest('.modal-close')) closeModal('career-modal'); });
   // desbloqueia o áudio no primeiro toque (exigência dos navegadores de celular)
   document.addEventListener('pointerdown', () => playSound('none'), { once: true });

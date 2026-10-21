@@ -27,7 +27,7 @@ export function renderCase(c, dossie, role, nivel){
 
   const mine = role === 'acusacao' ? c.perguntas_acu : c.perguntas_def;
   const sections = [];
-  if(mine?.length) sections.push(`<div class="art-strategy-block ${role==='acusacao'?'asb-acu':'asb-def'}"><div class="asb-label">Perguntas para a sua estratégia</div><div>${mine.map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
+  if(mine?.length) sections.push(`<div class="art-strategy-block ${role==='acusacao'?'asb-acu':'asb-def'}"><div class="asb-label">Para a sua estratégia</div><div>${mine.map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
   if(c.arts_rapidos?.length) sections.push(`<div class="art-strategy-block"><div class="asb-label">Pontos-chave</div><div>${c.arts_rapidos.map(p=>`<div class="art-texto">• ${escapeHtml(p)}</div>`).join('')}</div></div>`);
   $('g-guide').innerHTML = sections.join('');
   $('g-hot').innerHTML = (c.hot || []).map(item=>`<div class="art-texto">• ${escapeHtml(item)}</div>`).join('');

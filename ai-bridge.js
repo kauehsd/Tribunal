@@ -57,6 +57,11 @@ const LOCAL = {
   // sem IA não dá para inventar um caso: quem chamou escolhe um caso pronto
   gerar_caso: () => ({ text: 'ok', caso: null }),
 
+  // sem IA o fiscal não pune ninguém (punir um jogador honesto por engano é pior do que deixar passar)
+  fiscal: () => ({ violacoes: [], text: '', em_resumo: '' }),
+  // e a questão de ordem é devolvida sem ponto para ninguém (quem chamou trata provider === 'local')
+  impugnacao: () => ({ procede: false, trecho: '', text: '', em_resumo: '' }),
+
   diligencia: (c, x) => {
     const idx = (x.fatos_ocultos || []).length ? 0 : -1;
     return {

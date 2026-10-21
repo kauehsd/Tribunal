@@ -19,7 +19,8 @@ export async function callJudgeApi(mode, { caseObj, extra } = {}) {
       signal: controller.signal
     });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok || (!data.text && !data.votos)) throw new Error(data.error || `http_${r.status}`);
+    // texto vazio é resposta válida (ex.: fiscal sem nenhuma violação); só erro HTTP conta como falha
+    if (!r.ok || data.error || !data.provider) throw new Error(data.error || `http_${r.status}`);
     return data;
   } finally {
     clearTimeout(timer);
@@ -28,6 +29,6 @@ export async function callJudgeApi(mode, { caseObj, extra } = {}) {
 
 // Manda só o que a IA precisa (o caso inteiro tem vade mecum, calculadora etc.).
 function slimCase(c = {}) {
-  const { id, titulo, corpo, context_juiz, antecedentes_criminais, contexto_social, provas, penaMin, penaMax } = c;
-  return { id, titulo, corpo, context_juiz, antecedentes_criminais, contexto_social, provas, penaMin, penaMax };
+  const { id, titulo, corpo, context_juiz, antecedentes_criminais, contexto_social, provas, linha_tempo, penaMin, penaMax } = c;
+  return { id, titulo, corpo, context_juiz, antecedentes_criminais, contexto_social, provas, linha_tempo, penaMin, penaMax };
 }

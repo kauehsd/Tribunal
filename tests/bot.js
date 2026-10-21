@@ -30,8 +30,10 @@ const TEXTO = {
 function stripHtml(s){ return String(s || '').replace(/<[^>]+>/g, ''); }
 
 export function play(opts = {}){
-  const o = { protestar:false, contradicao:false, apelar:true, aceitarAcordo:false, proporAcordo:true, timeoutMin:15, ...opts };
-  let busy = false, asked = 0, pointed = false, protestedFor = null;
+  // mentir: põe um fato inventado e uma acusação sem prova nas alegações (o fiscal tem que punir)
+  // impugnar: levanta questão de ordem contra a primeira alegação do adversário
+  const o = { protestar:false, contradicao:false, apelar:true, aceitarAcordo:false, proporAcordo:true, mentir:false, impugnar:false, timeoutMin:15, ...opts };
+  let busy = false, asked = 0, pointed = false, protestedFor = null, impugnou = false;
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const timer = setInterval(async () => {
@@ -88,10 +90,15 @@ export function play(opts = {}){
         case 'debates': {
           const d = room.debates;
           if(!d || d.turno >= TURNOS.length) return;
+          if(o.impugnar && !impugnou){
+            const alvo = Object.entries(room.autos || {}).find(([, a]) => a.tipo === 'alegacao' && a.por !== role);
+            if(alvo){ impugnou = true; say('QUESTÃO DE ORDEM'); return actions.questaoDeOrdem(alvo[0], 'O adversário afirmou fatos que não aparecem em nenhuma prova nem depoimento, como o que disse sobre confissões e testemunhas que nunca depuseram.'); }
+          }
           const turno = TURNOS[d.turno];
           if(turno.role !== role) return;
-          say('fala', turno.tipo);
-          return turno.tipo === 'alegacao' ? actions.enviarAlegacao(TEXTO.alegacao(role), TEXTO.pedido(role)) : actions.enviarAlegacao(TEXTO.replica(role), null);
+          say('fala', turno.tipo, o.mentir ? '(com mentira)' : '');
+          const mentira = o.mentir ? ' Além disso, o réu confessou tudo ao porteiro do prédio na manhã seguinte, e o advogado da defesa pagou a testemunha para mentir em juízo.' : '';
+          return turno.tipo === 'alegacao' ? actions.enviarAlegacao(TEXTO.alegacao(role) + mentira, TEXTO.pedido(role)) : actions.enviarAlegacao(TEXTO.replica(role), null);
         }
         case 'recurso': {
           const r = room.recurso || {};

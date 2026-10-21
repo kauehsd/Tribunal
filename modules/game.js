@@ -21,6 +21,8 @@ const LOCK_MS = 80000;              // trava da IA expira sozinha se um aparelho
 const STALE_MS = 30000;             // se quem deveria agir sumiu, o outro aparelho assume
 const MAX_PROTESTOS = 3;
 const MAX_CONTRADICOES = 2;
+const MAX_QO = 3;                   // questões de ordem por lado, por caso
+const PECAS_FISCAIS = ['denuncia', 'resposta', 'alegacao', 'apelacao', 'contrarrazoes'];
 const LIMITE_PERGUNTAS = { estagiario:5, advogado:4, jurista:4 };
 const AI_PERGUNTAS = 2;             // perguntas do rival no modo treino
 const ASSIST_LIMITE = { estagiario:Infinity, advogado:5, jurista:0 };
@@ -49,7 +51,8 @@ const MOTIVOS_PROTESTO = [
   { id:'impertinente', label:'Fora do caso', desc:'não tem a ver com os fatos' },
   { id:'repetida', label:'Repetida', desc:'já foi respondida' },
   { id:'especulativa', label:'Pede opinião', desc:'testemunha não especula' },
-  { id:'ofensiva', label:'Ofensiva', desc:'constrange a testemunha' }
+  { id:'ofensiva', label:'Ofensiva', desc:'constrange a testemunha' },
+  { id:'premissa', label:'Premissa falsa', desc:'afirma fato fora dos autos' }
 ];
 
 // ══════════════════════════════════════════════════════
@@ -91,13 +94,21 @@ function caseState(caseData){
 export const CLEAR_CASE = {
   caseData:null, rito:null, acordo:null, score:null, cartas:null, autos:null, pecas:null, recebimento:null,
   instrucao:null, pronuncia:null, debates:null, julgamento:null, recurso:null, final:null, judge_busy:null,
-  fatosRevelados:null, assistUses:null, ia_chat_acusacao:null, ia_chat_defesa:null, reveal:null
+  fatosRevelados:null, assistUses:null, ia_chat_acusacao:null, ia_chat_defesa:null, reveal:null,
+  fiscal:null, desconsiderados:null, qo:null, impugnacoes:null
 };
 
 // ══════════════════════════════════════════════════════
 // Escrita no Firebase
 // ══════════════════════════════════════════════════════
 function pushAuto(entry){ return G.roomRef.child('autos').push({ ...entry, ts: TS() }); }
+
+// Peças com afirmações de fato passam pelo fiscal dos autos antes de qualquer decisão
+async function pushPeca(entry){
+  const ref = await pushAuto(entry);
+  await G.roomRef.child(`fiscal/${ref.key}`).set(true);
+  return ref;
+}
 
 async function addScore(points){
   if(!points) return;
@@ -156,12 +167,24 @@ function pairKey(room){
   return (room.solo ? 'solo+' : '') + names.join('+');
 }
 
+// Só entram no sorteio crimes graves (pena máxima de 10 anos ou mais). Os casos leves continuam
+// no código, mas não são sorteados; o tutorial só aparece quando pedido ao criar a sala.
+const casosGraves = jogados => CASES.filter(c => !c.tutorial && c.penaMax >= 10 && !jogados[c.id]);
+
+async function gerarCasoInedito(histRef, hist){
+  const tema = pickTema(hist.temas || []);
+  const r = await ask('gerar_caso', {}, { tema, evitar: Object.values(hist.casos || {}).map(j => j.titulo) });
+  if(!r.caso) return null;
+  await histRef.child('temas').transaction(t => [...(t || []), tema].slice(-60));
+  return r.caso;
+}
+
 async function sortearCaso(room){
   if(room.phase !== 'sorteio') return;
   const histRef = G.db.ref(`history/${pairKey(room)}`);
   const hist = (await histRef.once('value')).val() || {};
   const jogados = hist.casos || {};
-  const prontos = CASES.filter(c => !c.tutorial && !jogados[c.id]);
+  const prontos = casosGraves(jogados);
 
   let caseData = null;
   if(room.tutorial && !jogados['00']){
@@ -170,16 +193,15 @@ async function sortearCaso(room){
   } else if(prontos.length){
     const c = prontos[Math.floor(Math.random() * prontos.length)];
     caseData = { ...c, dossie: DOSSIES[c.id] };
+  } else if(hist.proximo?.caso){
+    // a IA já escreveu este caso em segundo plano durante a partida anterior
+    caseData = hist.proximo.caso;
+    await histRef.child('proximo').remove();
   } else {
-    // acabaram os casos prontos: a IA escreve um caso inédito
-    const tema = pickTema(hist.temas || []);
-    const r = await ask('gerar_caso', {}, { tema, evitar: Object.values(jogados).map(j => j.titulo) });
-    if(r.caso){
-      caseData = r.caso;
-      await histRef.child('temas').transaction(t => [...(t || []), tema].slice(-60));
-    } else {
-      // sem IA no momento: repete o caso jogado há mais tempo (melhor do que travar)
-      const antigo = Object.entries(jogados).sort((a, b) => a[1].ts - b[1].ts).map(([id]) => CASES.find(c => c.id === id)).find(Boolean) || CASES[1];
+    caseData = await gerarCasoInedito(histRef, hist);
+    if(!caseData){
+      // sem IA no momento: repete o caso grave jogado há mais tempo (melhor do que travar)
+      const antigo = Object.entries(jogados).sort((a, b) => a[1].ts - b[1].ts).map(([id]) => CASES.find(c => c.id === id && c.penaMax >= 10)).find(Boolean) || CASES.find(c => c.id === '02');
       caseData = { ...antigo, dossie: DOSSIES[antigo.id] };
       toast('A IA não respondeu para criar um caso novo. Sorteamos um caso já jogado.');
     }
@@ -199,6 +221,24 @@ async function sortearCaso(room){
   await G.roomRef.update({ ...st, players });
 }
 
+// Enquanto vocês jogam, a IA já escreve o PRÓXIMO caso (se não houver mais casos prontos inéditos),
+// para o sorteio seguinte não ter espera. Só um aparelho faz isso, uma vez por carregamento.
+let preGenTried = false;
+async function preGerarProximo(room){
+  if(preGenTried) return;
+  preGenTried = true;
+  try{
+    const histRef = G.db.ref(`history/${pairKey(room)}`);
+    const hist = (await histRef.once('value')).val() || {};
+    if(hist.proximo?.caso || casosGraves(hist.casos || {}).length > 0) return;
+    const tx = await histRef.child('gerando').transaction(v => (v && Date.now() - v < 180000) ? undefined : Date.now());
+    if(!tx.committed) return;
+    const caso = await gerarCasoInedito(histRef, hist);
+    if(caso) await histRef.child('proximo').set({ caso, ts: Date.now() });
+    await histRef.child('gerando').remove();
+  }catch(e){ console.warn('[pré-geração]', e); }
+}
+
 // ══════════════════════════════════════════════════════
 // Contexto para a IA
 // ══════════════════════════════════════════════════════
@@ -216,6 +256,8 @@ function autoLine(a){
     case 'alegacao': return `[${PECA_NOME[a.subtipo] || 'ALEGAÇÕES'} — ${quem}] ${a.texto}${a.pedido ? ` (Pedido: ${a.pedido})` : ''}`;
     case 'sentenca': case 'juri': return `[${a.tipo === 'juri' ? 'VEREDITO DO JÚRI' : 'SENTENÇA'}] ${a.decisao}: ${a.texto}${a.dosimetria?.pena_final ? ` Pena: ${a.dosimetria.pena_final}, regime ${a.dosimetria.regime}` : ''}`;
     case 'acordao': return `[ACÓRDÃO] ${a.resultado}: ${a.texto}`;
+    case 'advertencia': return `[ADVERTÊNCIA DO JUIZ à ${ROLE_LABEL[a.alvo]} (${a.nivel}ª): ${(a.violacoes || []).map(v => `${ROLE_LABEL[a.alvo]} afirmou sem base nos autos "${v.trecho}" (${v.tipo.replace('_', ' ')}) — DESCONSIDERADO`).join('; ')}. ${a.nivel >= 3 ? 'Litigância de má-fé reconhecida.' : ''}]`;
+    case 'questao_ordem': return `[QUESTÃO DE ORDEM da ${quem} contra a ${ROLE_LABEL[a.alvo]}: "${a.alegacao}"] Juiz: ${a.procede ? `PROCEDE — trecho "${a.trecho}" desconsiderado` : 'NÃO PROCEDE'} — ${a.texto}`;
     case 'nota': return `[${a.texto}]`;
     default:
       if(PECA_NOME[a.tipo]) return `[${PECA_NOME[a.tipo]} — ${quem}] ${a.texto}`;
@@ -223,9 +265,22 @@ function autoLine(a){
   }
 }
 
+// Tira das peças os trechos que o juiz desconsiderou (fiscal ou questão de ordem), para nenhuma
+// IA levá-los em conta depois — nem o juiz na sentença, nem os jurados, nem os desembargadores.
+function semTrechosDesconsiderados(room, a){
+  const trechos = room.desconsiderados?.[a.key];
+  if(!trechos || !a.texto) return a;
+  let texto = a.texto;
+  for(const t of Object.values(trechos)) texto = texto.split(t).join('[trecho desconsiderado pelo juiz]');
+  return { ...a, texto };
+}
+
 function aiContext(room){
-  const autos = autosList(room).filter(a => a.tipo !== 'fase');
+  const autos = autosList(room).filter(a => a.tipo !== 'fase').map(a => semTrechosDesconsiderados(room, a));
+  const d = dossieOf(room);
   return {
+    // fatos verdadeiros que cada lado sabia em sigilo: citá-los não é "inventar"
+    segredos_partes: { acusacao: d.segredo_acu || [], defesa: d.segredo_def || [] },
     autos: autos.map(autoLine),
     niveis: { acusacao: nivelOf(room, 'acusacao'), defesa: nivelOf(room, 'defesa') },
     // falas das partes, para o motor local pontuar quando a IA estiver fora
@@ -270,7 +325,7 @@ export const actions = {
   // ── Denúncia ──
   async enviarPeca(tipo, texto){
     if(!checkText(texto, 30)) return false;
-    await pushAuto({ tipo, por: tipo === 'denuncia' ? 'acusacao' : 'defesa', texto });
+    await pushPeca({ tipo, por: tipo === 'denuncia' ? 'acusacao' : 'defesa', texto });
     await G.roomRef.child(`pecas/${tipo}`).set(texto);
     clearDraft(tipo);
     return true;
@@ -314,6 +369,23 @@ export const actions = {
       return false;
     }
     clearDraft('contradicao');
+    return true;
+  },
+  async questaoDeOrdem(pecaKey, alegacao){
+    const role = me();
+    const a = G.room.autos?.[pecaKey];
+    if(!a || a.por === role || !PECAS_FISCAIS.includes(a.tipo)){ toast('Só dá para impugnar uma peça do adversário.'); return false; }
+    if(G.room.qo?.[pecaKey]){ toast('Essa peça já foi impugnada.'); return false; }
+    if(!checkText(alegacao, 12)) return false;
+    const tx = await G.roomRef.child(`impugnacoes/${role}`).transaction(v => (v || 0) < MAX_QO ? (v || 0) + 1 : undefined);
+    if(!tx.committed){ toast(`Você já usou suas ${MAX_QO} questões de ordem neste caso.`); return false; }
+    let ok = false;
+    const locked = await withLock('O juiz confere a questão de ordem nos autos…', async room => { ok = await runImpugnacao(room, role, pecaKey, alegacao); });
+    if(!locked || !ok){
+      await G.roomRef.child(`impugnacoes/${role}`).transaction(v => Math.max(0, (v || 1) - 1));
+      if(!locked) toast('O tribunal está ocupado. Tente de novo em instantes.');
+      return false;
+    }
     return true;
   },
   async encerrarPerguntas(){ await G.roomRef.child(`instrucao/pronto/${me()}`).set(true); return true; },
@@ -383,14 +455,15 @@ export const actions = {
   },
   async enviarRazoes(texto){
     if(!checkText(texto, 30)) return false;
-    await pushAuto({ tipo:'apelacao', por: me(), texto });
+    await pushPeca({ tipo:'apelacao', por: me(), texto });
     await G.roomRef.child('recurso').update({ razoes:texto, status:'contrarrazoes' });
     clearDraft('razoes');
     return true;
   },
   async enviarContrarrazoes(texto, dispensar = false){
     if(!dispensar && !checkText(texto, 20)) return false;
-    await pushAuto(dispensar ? { tipo:'nota', por:'sistema', texto:`${ROLE_LABEL[me()]} não apresentou contrarrazões.` } : { tipo:'contrarrazoes', por: me(), texto });
+    if(dispensar) await pushAuto({ tipo:'nota', por:'sistema', texto:`${ROLE_LABEL[me()]} não apresentou contrarrazões.` });
+    else await pushPeca({ tipo:'contrarrazoes', por: me(), texto });
     await G.roomRef.child('recurso').update({ contrarrazoes: dispensar ? '' : texto, status:'julgando' });
     clearDraft('contrarrazoes');
     return true;
@@ -426,7 +499,7 @@ async function createPending(role, testemunhaId, pergunta){
 async function submitTurn(t, role, texto, pedido){
   const atual = (await G.roomRef.child('debates/turno').once('value')).val();
   if(atual !== t) return;
-  await pushAuto({ tipo:'alegacao', subtipo: TURNOS[t].tipo, por: role, texto, pedido: pedido || null });
+  await pushPeca({ tipo:'alegacao', subtipo: TURNOS[t].tipo, por: role, texto, pedido: pedido || null });
   await G.roomRef.child('debates').transaction(d => {
     if(!d || d.turno !== t) return undefined;
     d.turno = t + 1; d.inicio = now(); d.extra = 0;
@@ -455,6 +528,59 @@ async function runContradicao(room, role, testemunhaId, alegacao){
 }
 
 // ══════════════════════════════════════════════════════
+// FISCAL DOS AUTOS — só vale o que está no processo
+// ══════════════════════════════════════════════════════
+// dois trechos falam da mesma coisa? (metade ou mais das palavras relevantes em comum)
+function sobrepoe(a, b){
+  const w = t => new Set((String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').match(/[a-z0-9]{4,}/g) || []));
+  const A = w(a), B = w(b);
+  if(!A.size || !B.size) return false;
+  return [...A].filter(x => B.has(x)).length >= Math.ceil(Math.min(A.size, B.size) / 2);
+}
+
+const PENALIDADE = n => n >= 3 ? { perde:5, ganha:2 } : n === 2 ? { perde:3, ganha:1 } : { perde:2, ganha:1 };
+
+async function runFiscal(room, key){
+  if(!room.fiscal?.[key]) return;
+  await G.roomRef.child(`fiscal/${key}`).remove();
+  const a = room.autos?.[key];
+  if(!a?.texto) return;
+  const r = await ask('fiscal', caseOf(room), { ...aiContext(room), peca: { tipo: PECA_NOME[a.subtipo || a.tipo] || a.tipo, por: a.por, texto: a.texto } });
+  if(!r.violacoes?.length) return;
+  const nivel = autosList(room).filter(x => x.tipo === 'advertencia' && x.alvo === a.por).length + 1;
+  const calunia = r.violacoes.some(v => v.tipo === 'calunia');
+  let { perde, ganha } = PENALIDADE(nivel);
+  if(calunia){ perde = Math.max(perde, 4); ganha = 2; }  // acusar alguém de crime sem prova volta contra quem acusou
+  await G.roomRef.child(`desconsiderados/${key}`).update(Object.fromEntries(r.violacoes.map((v, i) => [`f${i}`, v.trecho])));
+  await pushAuto({ tipo:'advertencia', por:'juiz', alvo:a.por, pecaKey:key, nivel, calunia, violacoes:r.violacoes, texto:r.text, em_resumo:r.em_resumo, perde, ganha, provider:r.provider });
+  await addScore({ [a.por]: -perde, [otherRole(a.por)]: ganha });
+  playSound('gavel');
+}
+
+async function runImpugnacao(room, role, key, alegacao){
+  const a = room.autos?.[key];
+  if(!a || room.qo?.[key]) return false;
+  const r = await ask('impugnacao', caseOf(room), { ...aiContext(room), por: role, peca: { tipo: PECA_NOME[a.subtipo || a.tipo] || a.tipo, por: a.por, texto: a.texto }, alegacao });
+  if(r.provider === 'local'){
+    // sem IA não dá para conferir com justiça: devolve a questão de ordem, sem ponto para ninguém
+    await pushAuto({ tipo:'nota', por:'sistema', texto:'O juiz não conseguiu analisar a questão de ordem agora. Ela foi devolvida: tente de novo em instantes.' });
+    return false;
+  }
+  // o fiscal já tinha riscado esse trecho: não pune duas vezes, e devolve a questão de ordem
+  const jaRiscados = Object.values(room.desconsiderados?.[key] || {});
+  if(r.procede && r.trecho && jaRiscados.some(t => sobrepoe(t, r.trecho))){
+    await pushAuto({ tipo:'nota', por:'sistema', texto:`Questão de ordem prejudicada: o juiz já havia desconsiderado esse trecho ("${r.trecho}"). Ela foi devolvida, sem ponto para ninguém.` });
+    return false;
+  }
+  await G.roomRef.child(`qo/${key}`).set(role);
+  if(r.procede && r.trecho) await G.roomRef.child(`desconsiderados/${key}/q`).set(r.trecho);
+  await pushAuto({ tipo:'questao_ordem', por: role, alvo: a.por, pecaKey: key, alegacao, procede: r.procede, trecho: r.trecho || '', texto: r.text, em_resumo: r.em_resumo, provider: r.provider });
+  await addScore(r.procede ? { [role]: 2, [a.por]: -2 } : { [role]: -1 });
+  playSound(r.procede ? 'twist' : 'gavel');
+  return true;
+}
+
+// ══════════════════════════════════════════════════════
 // PILOTO AUTOMÁTICO — o que os personagens de IA fazem, e quando
 // ══════════════════════════════════════════════════════
 let autopilotRunning = false;
@@ -477,6 +603,13 @@ async function step(room){
   if(!me()) return;
   const c = caseOf(room);
   const ai = aiRole(room);
+
+  // o próximo caso inédito é escrito em segundo plano (não bloqueia nada)
+  if(room.caseData) preGerarProximo(room);
+
+  // antes de qualquer decisão, o juiz confere as peças que acabaram de chegar
+  const fila = Object.keys(room.fiscal || {});
+  if(fila.length) return withLock('O juiz confere a peça…', r => runFiscal(r, fila[0]));
 
   switch(room.phase){
     case 'acordo': {
@@ -550,14 +683,14 @@ async function step(room){
           if(fr.recurso?.status !== 'decidir') return;
           const o = await ask('oponente', caseOf(fr), { ...aiContext(fr), papel: ai, tarefa:'apelacao', nivel_humano: nivelOf(fr, me()) });
           await pushAuto({ tipo:'nota', por:'sistema', texto:`${ROLE_ICON[ai]} ${ROLE_LABEL[ai]} interpôs APELAÇÃO ao Tribunal de Justiça.` });
-          await pushAuto({ tipo:'apelacao', por: ai, texto: o.text });
+          await pushPeca({ tipo:'apelacao', por: ai, texto: o.text });
           await G.roomRef.child('recurso').update({ status:'contrarrazoes', apelante: ai, razoes: o.text });
         });
       }
       if(r.status === 'contrarrazoes' && ai && r.apelante !== ai) return withLock(`A ${ROLE_LABEL[ai]} (IA) responde ao recurso…`, async fr => {
         if(fr.recurso?.status !== 'contrarrazoes') return;
         const o = await ask('oponente', caseOf(fr), { ...aiContext(fr), papel: ai, tarefa:'contrarrazoes', nivel_humano: nivelOf(fr, me()) });
-        await pushAuto({ tipo:'contrarrazoes', por: ai, texto: o.text });
+        await pushPeca({ tipo:'contrarrazoes', por: ai, texto: o.text });
         await G.roomRef.child('recurso').update({ contrarrazoes: o.text, status:'julgando' });
       });
       return;
@@ -594,7 +727,7 @@ async function aiPeca(room, role, tipo){
   if(room.phase !== 'denuncia' || p[tipo]) return;
   const d = dossieOf(room);
   const o = await ask('oponente', caseOf(room), { ...aiContext(room), papel: role, tarefa: tipo, segredos: role === 'acusacao' ? d.segredo_acu : d.segredo_def, nivel_humano: nivelOf(room, me()) });
-  await pushAuto({ tipo, por: role, texto: o.text });
+  await pushPeca({ tipo, por: role, texto: o.text });
   await G.roomRef.child(`pecas/${tipo}`).set(o.text);
 }
 
@@ -759,6 +892,7 @@ export function render(){
   }
   renderTop(room);
   renderAutos(room);
+  syncAutosMarks(room);
   renderPending(room);
   renderBusy(room);
   renderPanel(room);
@@ -818,7 +952,8 @@ function autoHtml(a){
     case 'nota': return `<div class="auto-nota">${escapeHtml(a.texto)}</div>`;
     case 'denuncia': case 'resposta': case 'apelacao': case 'contrarrazoes': case 'acordo_proposta': case 'acordo_resposta': case 'alegacao': {
       const nome = a.tipo === 'alegacao' ? (PECA_NOME[a.subtipo] || 'ALEGAÇÕES') : (PECA_NOME[a.tipo] || 'MANIFESTAÇÃO');
-      return `<div class="bubble ${roleBubbleClass(a.por)}"><div class="b-head">${who(a.por)}<span>${nome.toLowerCase()}</span></div><div class="b-body">${nl2br(a.texto)}</div>${a.pedido ? `<div class="b-pedido">Pede <b>${escapeHtml(a.pedido)}</b></div>` : ''}</div>`;
+      const qo = PECAS_FISCAIS.includes(a.tipo) && a.por !== me() && me() ? `<button type="button" class="qo-btn" data-qo="${a.key}">Questão de ordem</button>` : '';
+      return `<div class="bubble ${roleBubbleClass(a.por)}"><div class="b-head">${who(a.por)}<span>${nome.toLowerCase()}</span></div><div class="b-body">${nl2br(a.texto)}</div>${a.pedido ? `<div class="b-pedido">Pede <b>${escapeHtml(a.pedido)}</b></div>` : ''}${qo}</div>`;
     }
     case 'decisao': case 'acordo_decisao': case 'pronuncia': {
       const com = a.comentarios ? ['acusacao', 'defesa'].filter(r => a.comentarios[r]).map(r => `<div class="fb ${r}"><span>${escapeHtml(nameOf(room, r))}${a.pontos ? ` <b>+${a.pontos[r] || 0}</b>` : ''}</span>${escapeHtml(a.comentarios[r])}</div>`).join('') : '';
@@ -834,6 +969,12 @@ function autoHtml(a){
         <div class="judge alert gloss"><div class="j-head">${avatar('✋', 'alert')}<div><b>Protesto deferido</b><small>${ROLE_LABEL[a.protestoPor]} · ${escapeHtml(a.motivo)}</small></div>${providerTag(a.provider)}</div><div class="j-body">${escapeHtml(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
     case 'contradicao':
       return `<div class="judge ${a.procede ? 'win' : 'alert'} gloss"><div class="j-head">${avatar('🎯', a.procede ? 'win' : 'alert')}<div><b>Contradição ${a.procede ? 'confirmada' : 'rejeitada'}</b><small>${escapeHtml(nameOf(room, a.por))} sobre ${escapeHtml(a.nome)} · ${a.procede ? '+3' : '−1'}</small></div>${providerTag(a.provider)}</div><div class="j-quote">“${escapeHtml(a.alegacao)}”</div><div class="j-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
+    case 'advertencia': {
+      const titulo = a.calunia ? 'Acusação sem prova' : a.nivel >= 3 ? 'Litigância de má-fé' : `Advertência${a.nivel > 1 ? ` (${a.nivel}ª)` : ''}`;
+      return `<div class="judge alert gloss"><div class="j-head">${avatar('⚠️', 'alert')}<div><b>${titulo}</b><small>à ${ROLE_LABEL[a.alvo]} · só vale o que está nos autos</small></div>${providerTag(a.provider)}</div>${(a.violacoes || []).map(v => `<div class="j-quote"><del>${escapeHtml(v.trecho)}</del><small>${escapeHtml(v.explicacao || '')}</small></div>`).join('')}<div class="j-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}<div class="penalty"><span class="${a.alvo}">−${a.perde} ${escapeHtml(nameOf(room, a.alvo))}</span><span class="${otherRole(a.alvo)}">+${a.ganha} ${escapeHtml(nameOf(room, otherRole(a.alvo)))}</span></div></div>`;
+    }
+    case 'questao_ordem':
+      return `<div class="judge ${a.procede ? 'win' : 'alert'} gloss"><div class="j-head">${avatar('☝️', a.procede ? 'win' : 'alert')}<div><b>Questão de ordem ${a.procede ? 'acolhida' : 'rejeitada'}</b><small>${escapeHtml(nameOf(room, a.por))} contra a ${ROLE_LABEL[a.alvo]}</small></div>${providerTag(a.provider)}</div><div class="j-quote">“${escapeHtml(a.alegacao)}”</div>${a.procede && a.trecho ? `<div class="j-quote"><del>${escapeHtml(a.trecho)}</del></div>` : ''}<div class="j-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}<div class="penalty">${a.procede ? `<span class="${a.por}">+2 ${escapeHtml(nameOf(room, a.por))}</span><span class="${a.alvo}">−2 ${escapeHtml(nameOf(room, a.alvo))}</span>` : `<span class="${a.por}">−1 ${escapeHtml(nameOf(room, a.por))}</span>`}</div></div>`;
     case 'diligencia':
       return `<div class="judge dilig gloss"><div class="j-head">${avatar('🔍', 'dilig')}<div><b>Diligência</b><small>pedida pela ${ROLE_LABEL[a.por]}</small></div>${providerTag(a.provider)}</div><div class="j-quote">“${escapeHtml(a.pedido)}”</div><div class="j-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
     case 'reviravolta':
@@ -868,6 +1009,7 @@ function renderAutos(room){
     if(!html) continue;
     const el = document.createElement('div');
     el.className = 'auto-item' + (firstAutosRender ? '' : ' new');
+    el.dataset.key = a.key;
     el.innerHTML = html;
     el.querySelectorAll('.gloss').forEach(applyGlossary);
     box.appendChild(el);
@@ -883,6 +1025,20 @@ function renderAutos(room){
   else if(['decisao', 'pronuncia', 'acordo_decisao', 'diligencia'].includes(lastTipo)) playSound('judge');
   else if(lastTipo !== 'fase') playSound('message');
   if(!document.querySelector('.nav-btn[data-tab="audiencia"]')?.classList.contains('active')) $('aud-notif')?.classList.add('show');
+}
+
+// Risca nas peças os trechos desconsiderados e esconde os botões de questão de ordem que já não valem
+function syncAutosMarks(room){
+  for(const [key, trechos] of Object.entries(room.desconsiderados || {})){
+    const body = document.querySelector(`.auto-item[data-key="${key}"] .b-body`);
+    if(!body) continue;
+    for(const t of Object.values(trechos)){
+      const h = escapeHtml(t);
+      if(h && body.innerHTML.includes(h) && !body.innerHTML.includes(`<del>${h}</del>`)) body.innerHTML = body.innerHTML.split(h).join(`<del>${h}</del>`);
+    }
+  }
+  const esgotou = (room.impugnacoes?.[me()] || 0) >= MAX_QO || room.phase === 'fim';
+  document.querySelectorAll('.qo-btn').forEach(b => { b.hidden = esgotou || Boolean(room.qo?.[b.dataset.qo]); });
 }
 
 function scrollAutos(smooth){
