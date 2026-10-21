@@ -14,15 +14,15 @@ export function renderCase(c, dossie, role, nivel){
   if(segredos?.length) blocks.push(`<div class="card secret-card"><div class="section-lbl">🔒 só você sabe (${ROLE_LABEL[role]})</div>${segredos.map(s=>`<div class="brief-body">• ${escapeHtml(s)}</div>`).join('')}<div class="secret-note">Na vida real, cada lado tem informações que o outro não tem. Use com estratégia — ou guarde para a hora certa.</div></div>`);
   if(nivel === 'estagiario' && dicas?.length) blocks.push(`<div class="card tip-card"><div class="section-lbl">💡 dicas de estagiário</div>${dicas.map(d=>`<div class="brief-body">• ${escapeHtml(d)}</div>`).join('')}</div>`);
 
-  blocks.push(`<div class="card"><div class="section-lbl">// quem vai depor</div><div class="wit-list">${dossie.testemunhas.map(t=>`
+  blocks.push(`<div class="card"><div class="section-lbl">quem vai depor</div><div class="wit-list">${dossie.testemunhas.map(t=>`
     <div class="wit-mini"><span class="wit-emoji">${t.emoji}</span><div><div class="wit-name">${escapeHtml(t.nome)}</div><div class="wit-role">${escapeHtml(t.papel_txt)} · arrolada pela ${t.arrolada_por === 'juizo' ? 'lei (interrogatório)' : ROLE_LABEL[t.arrolada_por].toLowerCase()}</div><div class="wit-profile">${escapeHtml(t.perfil)}</div></div></div>`).join('')}</div></div>`);
 
-  if(c.contexto_social) blocks.push(`<div class="card"><div class="section-lbl">// contexto social</div><div class="brief-body">${escapeHtml(c.contexto_social)}</div></div>`);
+  if(c.contexto_social) blocks.push(`<div class="card"><div class="section-lbl">contexto social</div><div class="brief-body">${escapeHtml(c.contexto_social)}</div></div>`);
   if(c.antecedentes || c.antecedentes_criminais){
-    blocks.push(`<div class="card"><div class="section-lbl">// antecedentes</div>${c.antecedentes?`<div class="brief-body"><strong>Perfil social:</strong> ${escapeHtml(c.antecedentes)}</div>`:''}${c.antecedentes_criminais?`<div class="brief-body" style="margin-top:10px;"><strong>Antecedentes criminais:</strong> ${escapeHtml(c.antecedentes_criminais)}</div>`:''}</div>`);
+    blocks.push(`<div class="card"><div class="section-lbl">antecedentes</div>${c.antecedentes?`<div class="brief-body"><strong>Perfil social:</strong> ${escapeHtml(c.antecedentes)}</div>`:''}${c.antecedentes_criminais?`<div class="brief-body" style="margin-top:10px;"><strong>Antecedentes criminais:</strong> ${escapeHtml(c.antecedentes_criminais)}</div>`:''}</div>`);
   }
-  if(c.provas?.length) blocks.push(`<div class="card"><div class="section-lbl">// provas nos autos</div><div class="brief-body">${c.provas.map(p=>`<div style="margin-bottom:6px;">• ${escapeHtml(p)}</div>`).join('')}</div><div id="g-provas-novas"></div></div>`);
-  if(c.linha_tempo?.length) blocks.push(`<div class="card"><div class="section-lbl">// linha do tempo</div><div class="brief-body">${c.linha_tempo.map(e=>`<div style="margin-bottom:5px;"><strong style="color:var(--gold2);">${escapeHtml(e.hora||e.data||'')}</strong> — ${escapeHtml(e.fato)}</div>`).join('')}</div></div>`);
+  if(c.provas?.length) blocks.push(`<div class="card"><div class="section-lbl">provas</div><div class="brief-body">${c.provas.map(p=>`<div style="margin-bottom:6px;">• ${escapeHtml(p)}</div>`).join('')}</div><div id="g-provas-novas"></div></div>`);
+  if(c.linha_tempo?.length) blocks.push(`<div class="card"><div class="section-lbl">linha do tempo</div><div class="brief-body">${c.linha_tempo.map(e=>`<div style="margin-bottom:5px;"><strong style="color:var(--gold2);">${escapeHtml(e.hora||e.data||'')}</strong> — ${escapeHtml(e.fato)}</div>`).join('')}</div></div>`);
   $('g-context').innerHTML = blocks.join('');
 
   const mine = role === 'acusacao' ? c.perguntas_acu : c.perguntas_def;
@@ -40,7 +40,7 @@ export function renderCase(c, dossie, role, nivel){
 // Provas que surgiram durante o processo (diligências e reviravolta)
 export function renderNewEvidence(items){
   const el = $('g-provas-novas'); if(!el) return;
-  el.innerHTML = items.length ? `<div class="section-lbl" style="margin-top:12px;color:var(--gold2);">// provas novas no processo</div>${items.map(p=>`<div class="brief-body new-proof">🆕 ${escapeHtml(p)}</div>`).join('')}` : '';
+  el.innerHTML = items.length ? `<div class="section-lbl" style="margin-top:12px;color:var(--gold2);">provas novas no processo</div>${items.map(p=>`<div class="brief-body new-proof">🆕 ${escapeHtml(p)}</div>`).join('')}` : '';
 }
 
 // ── Aba VADE ──────────────────────────────────────────────────────────────
@@ -54,8 +54,8 @@ function renderVade(c, role, nivel){
       <div class="art-header"><div class="art-header-content"><div class="art-num-badge">${escapeHtml(item.num||'')}</div><div class="art-name">${escapeHtml(item.nome)}</div><div class="art-pena">${escapeHtml(item.pena||'')}</div></div><div class="art-chevron">›</div></div>
       <div class="art-body">
         ${item.simple?`<div class="art-simple"><div class="art-simple-lbl">💡 em linguagem simples</div><div class="art-simple-txt">${item.simple}</div></div>`:''}
-        <div class="art-texto-label">// texto legal</div><div class="art-texto">${item.texto || ''}</div>
-        <div class="art-exp-label">// o que isso significa na prática</div><div class="art-exp">${item.exp || ''}</div>
+        <div class="art-texto-label">texto legal</div><div class="art-texto">${item.texto || ''}</div>
+        <div class="art-exp-label">o que significa na prática</div><div class="art-exp">${item.exp || ''}</div>
         <div class="art-strategy-block asb-mine"><div class="asb-label">Como a ${myLabel} usa isso</div><div class="art-simple-txt">${myText || ''}</div></div>
         <div class="art-strategy-block asb-opp"><div class="asb-label">Como a ${oppLabel} pode responder</div><div class="art-simple-txt">${oppText || ''}</div></div>
         ${item.juris?`<div class="art-juris">📚 ${escapeHtml(item.juris)} <span style="color:var(--text3);font-size:9px;">${escapeHtml(item.ref||'')}</span></div>`:''}

@@ -1,23 +1,26 @@
-// modules/game.js — o processo em fases: acordo → denúncia → instrução → (pronúncia) → debates → julgamento → recurso → fim
+// modules/game.js — o processo em fases:
+//   sorteio → acordo → denúncia → instrução → (pronúncia) → debates → julgamento → recurso → fim
 //
 // Tudo o que acontece fica na sala do Firebase (rooms/{código}). Cada aparelho:
 //   1. escuta a sala inteira e redesenha a tela (render)
 //   2. roda o "piloto automático" (autopilot): quando chega a hora de um personagem de IA
-//      falar (juiz, testemunha, jurados, desembargadores ou o rival do modo treino), um dos
-//      aparelhos pega a trava `judge_busy` e faz a chamada — nunca os dois ao mesmo tempo.
+//      falar (juiz, testemunha, jurados, desembargadores, roteirista ou o rival do modo treino),
+//      um dos aparelhos pega a trava `judge_busy` e faz a chamada — nunca os dois ao mesmo tempo.
 import { ask } from '../ai-bridge.js';
+import { CASES } from '../data/cases.js';
 import { DOSSIES, JURADOS, DESEMBARGADORES } from '../data/dossies.js';
+import { pickTema } from '../data/temas.js';
 import { applyGlossary } from '../data/glossario.js';
-import { $, escapeHtml, nl2br, toast, playSound, ROLE_LABEL, ROLE_ICON, otherRole, fmtClock, saveDraft, loadDraft, clearDraft, autoGrow, moderate } from './util.js';
-import { renderNewEvidence } from './case_view.js';
+import { $, escapeHtml, nl2br, toast, playSound, vibrate, ROLE_LABEL, ROLE_ICON, otherRole, fmtClock, saveDraft, loadDraft, clearDraft, autoGrow, moderate, slug } from './util.js';
 import { computeResult, saveCareer, careerCardHtml } from './career.js';
 
-export const G = { db:null, roomRef:null, code:'', room:null, me:{ name:'', role:'' }, cases:[], serverOffset:0 };
+export const G = { db:null, roomRef:null, code:'', room:null, me:{ name:'', role:'' }, serverOffset:0, onCase:null };
 
 const PROTEST_WINDOW_MS = 9000;     // tempo que o adversário tem para gritar "Protesto!"
 const LOCK_MS = 80000;              // trava da IA expira sozinha se um aparelho cair no meio
 const STALE_MS = 30000;             // se quem deveria agir sumiu, o outro aparelho assume
 const MAX_PROTESTOS = 3;
+const MAX_CONTRADICOES = 2;
 const LIMITE_PERGUNTAS = { estagiario:5, advogado:4, jurista:4 };
 const AI_PERGUNTAS = 2;             // perguntas do rival no modo treino
 const ASSIST_LIMITE = { estagiario:Infinity, advogado:5, jurista:0 };
@@ -30,9 +33,10 @@ export const TURNOS = [
 ];
 
 export const FASES = {
+  sorteio: { nome:'Sorteio', icon:'🎲', o_que:'O caso é sorteado entre os que vocês ainda não jogaram.' },
   acordo: { nome:'Acordo', icon:'🤝', o_que:'Antes de o processo começar, a Acusação pode oferecer um acordo (ANPP) em crimes sem violência com pena mínima menor que 4 anos: o réu confessa, cumpre condições e o processo nem começa.', acusacao:'Decida se oferece um acordo e com quais condições. Condições firmes e justas valem pontos.', defesa:'Se vier uma proposta, decida: aceitar e encerrar o caso, ou arriscar o julgamento.' },
   denuncia: { nome:'Denúncia', icon:'📜', o_que:'A Acusação apresenta a denúncia: conta o que aconteceu, diz qual é o crime e pede a condenação. A Defesa responde apontando falhas e teses. O juiz decide se o processo segue.', acusacao:'Narre o fato, diga qual é o crime (com o artigo) e peça a condenação.', defesa:'Leia a denúncia e responda: aponte provas fracas, nulidades e a sua tese.' },
-  instrucao: { nome:'Instrução', icon:'🎙️', o_que:'A audiência: testemunhas, vítima, perito e, por último, o réu são ouvidos. Vocês perguntam diretamente (Art. 212 CPP), e o adversário pode gritar "Protesto!" contra perguntas indevidas.', acusacao:'Arranque das testemunhas o que prova a culpa. Uma pergunta certeira pode revelar um segredo (+2 pontos).', defesa:'Mostre contradições e dúvidas. Proteste contra perguntas que induzem a resposta.' },
+  instrucao: { nome:'Instrução', icon:'🎙️', o_que:'A audiência: testemunhas, vítima, perito e, por último, o réu são ouvidos. Vocês perguntam diretamente (Art. 212 CPP). O adversário pode protestar, e quem pegar uma testemunha em contradição ganha pontos.', acusacao:'Arranque das testemunhas o que prova a culpa. Perguntas certeiras revelam segredos (+2) e contradições valem +3.', defesa:'Mostre contradições e dúvidas. Proteste contra perguntas que induzem a resposta.' },
   pronuncia: { nome:'Pronúncia', icon:'🔨', o_que:'Nos crimes contra a vida, o juiz decide se o caso vai ao Júri Popular (7 cidadãos comuns) ou se o crime é outro, julgado por ele mesmo.' },
   debates: { nome:'Debates', icon:'🗣️', o_que:'As alegações finais: cada lado tem um tempo para resumir as provas e convencer quem vai julgar. Depois vêm a réplica e a tréplica.', acusacao:'Junte tudo o que foi provado e faça o seu pedido de pena.', defesa:'Mostre as dúvidas e peça a absolvição (ou a pena mínima).' },
   julgamento: { nome:'Julgamento', icon:'⚖️', o_que:'O juiz dá a sentença — ou, no Júri, os 7 jurados votam e o juiz calcula a pena.' },
@@ -41,10 +45,10 @@ export const FASES = {
 };
 
 const MOTIVOS_PROTESTO = [
-  { id:'indutiva', label:'Pergunta indutiva', desc:'já sugere a resposta' },
-  { id:'impertinente', label:'Sem relação com o caso', desc:'não tem a ver com os fatos' },
-  { id:'repetida', label:'Já respondida', desc:'repete outra pergunta' },
-  { id:'especulativa', label:'Pede opinião', desc:'testemunha não pode especular' },
+  { id:'indutiva', label:'Indutiva', desc:'já sugere a resposta' },
+  { id:'impertinente', label:'Fora do caso', desc:'não tem a ver com os fatos' },
+  { id:'repetida', label:'Repetida', desc:'já foi respondida' },
+  { id:'especulativa', label:'Pede opinião', desc:'testemunha não especula' },
   { id:'ofensiva', label:'Ofensiva', desc:'constrange a testemunha' }
 ];
 
@@ -54,31 +58,41 @@ const MOTIVOS_PROTESTO = [
 const now = () => Date.now() + G.serverOffset;
 const TS = () => firebase.database.ServerValue.TIMESTAMP;
 const me = () => G.me.role;
-const caseOf = room => G.cases[room.caseIdx] || G.cases[0];
-const dossieOf = room => DOSSIES[caseOf(room).id];
-const aiRole = room => room.solo ? otherRole(me()) : null;
+const caseOf = room => room.caseData || {};
+const dossieOf = room => room.caseData?.dossie || { testemunhas:[], reviravoltas:[], fatos_ocultos:[] };
+const aiRole = room => room.solo && me() ? otherRole(me()) : null;
 const isAI = (room, role) => Boolean(room.solo) && role === aiRole(room);
-const nameOf = (room, role) => isAI(room, role) ? `IA (${ROLE_LABEL[role]})` : (room.players?.[role]?.name || ROLE_LABEL[role]);
+const nameOf = (room, role) => isAI(room, role) ? 'IA' : (room.players?.[role]?.name || ROLE_LABEL[role]);
 const nivelOf = (room, role) => room.players?.[role]?.nivel || 'advogado';
 const witnessOf = (room, id) => dossieOf(room).testemunhas.find(t => t.id === id);
 const autosList = room => Object.entries(room.autos || {}).map(([k, v]) => ({ key:k, ...v }));
+const twistsOf = room => { const d = dossieOf(room); return d.reviravoltas?.length ? d.reviravoltas : [d.reviravolta].filter(Boolean); };
 
-export function initialRoomState(caseIdx, cases){
-  const c = cases[caseIdx];
-  const d = DOSSIES[c.id];
+export function roleOf(room, name){
+  return ['acusacao', 'defesa'].find(r => room?.players?.[r]?.name === name) || '';
+}
+
+// Estado de um caso novo (chamado no sorteio). caseData = caso + dossiê
+function caseState(caseData){
+  const d = caseData.dossie;
   const phase = d.acordo ? 'acordo' : 'denuncia';
   return {
-    caseIdx, rito: d.rito, phase,
+    caseData, rito: d.rito, phase,
     acordo: d.acordo ? { status:'proposta' } : null,
     score: { acusacao:0, defesa:0 },
     cartas: { acusacao:{ diligencia:1, pergunta:1, tempo:1 }, defesa:{ diligencia:1, pergunta:1, tempo:1 } },
     // chave que ordena antes de qualquer push do Firebase: a faixa da primeira fase abre os autos
-    autos: { '-0000inicio': { tipo:'fase', fase: phase, por:'sistema', texto:`${FASES[phase].icon} ${FASES[phase].nome.toUpperCase()}`, ts:0 } },
-    pecas: null, recebimento: null, instrucao: null, pronuncia: null,
-    debates: null, julgamento: null, recurso: null, final: null, judge_busy: null,
-    fatosRevelados: null, assistUses: null, ia_chat_acusacao: null, ia_chat_defesa: null
+    autos: { '-0000inicio': { tipo:'fase', fase: phase, por:'sistema', ts:0 } },
+    reveal: now()
   };
 }
+
+// Tudo o que é zerado ao começar outro caso na mesma sala
+export const CLEAR_CASE = {
+  caseData:null, rito:null, acordo:null, score:null, cartas:null, autos:null, pecas:null, recebimento:null,
+  instrucao:null, pronuncia:null, debates:null, julgamento:null, recurso:null, final:null, judge_busy:null,
+  fatosRevelados:null, assistUses:null, ia_chat_acusacao:null, ia_chat_defesa:null, reveal:null
+};
 
 // ══════════════════════════════════════════════════════
 // Escrita no Firebase
@@ -96,12 +110,16 @@ async function addScore(points){
 }
 
 // Muda de fase só se ainda estivermos na fase esperada (os dois aparelhos podem tentar ao mesmo tempo)
+// Os dados da nova fase são gravados ANTES da troca, para nenhum aparelho ver a fase nova sem os dados dela.
+// (As transições com dados acontecem sob a trava da IA, então não há dois aparelhos fazendo isso ao mesmo tempo.)
 async function setPhase(from, to, updates = {}){
+  if(Object.keys(updates).length){
+    if((await G.roomRef.child('phase').once('value')).val() !== from) return false;
+    await G.roomRef.update(updates);
+  }
   const tx = await G.roomRef.child('phase').transaction(p => p === from ? to : undefined);
   if(!tx.committed) return false;
-  if(Object.keys(updates).length) await G.roomRef.update(updates);
-  const f = FASES[to];
-  await pushAuto({ tipo:'fase', fase:to, por:'sistema', texto:`${f.icon} ${f.nome.toUpperCase()}` });
+  await pushAuto({ tipo:'fase', fase:to, por:'sistema' });
   return true;
 }
 
@@ -112,7 +130,7 @@ async function withLock(label, fn){
   localBusy = true;
   const ref = G.roomRef.child('judge_busy');
   try{
-    const tx = await ref.transaction(v => (v && now() - (v.ts || 0) < LOCK_MS) ? undefined : { ts: now(), label, by: me() });
+    const tx = await ref.transaction(v => (v && now() - (v.ts || 0) < LOCK_MS) ? undefined : { ts: now(), label, by: me() || 'sorteio' });
     if(!tx.committed) return false;
     try{
       const room = (await G.roomRef.once('value')).val();
@@ -131,6 +149,57 @@ async function withLock(label, fn){
 }
 
 // ══════════════════════════════════════════════════════
+// SORTEIO DO CASO — sem repetir para o mesmo casal
+// ══════════════════════════════════════════════════════
+function pairKey(room){
+  const names = Object.values(room.lobby || {}).map(p => slug(p.name)).sort();
+  return (room.solo ? 'solo+' : '') + names.join('+');
+}
+
+async function sortearCaso(room){
+  if(room.phase !== 'sorteio') return;
+  const histRef = G.db.ref(`history/${pairKey(room)}`);
+  const hist = (await histRef.once('value')).val() || {};
+  const jogados = hist.casos || {};
+  const prontos = CASES.filter(c => !c.tutorial && !jogados[c.id]);
+
+  let caseData = null;
+  if(room.tutorial && !jogados['00']){
+    const c = CASES.find(x => x.tutorial);
+    caseData = { ...c, dossie: DOSSIES[c.id] };
+  } else if(prontos.length){
+    const c = prontos[Math.floor(Math.random() * prontos.length)];
+    caseData = { ...c, dossie: DOSSIES[c.id] };
+  } else {
+    // acabaram os casos prontos: a IA escreve um caso inédito
+    const tema = pickTema(hist.temas || []);
+    const r = await ask('gerar_caso', {}, { tema, evitar: Object.values(jogados).map(j => j.titulo) });
+    if(r.caso){
+      caseData = r.caso;
+      await histRef.child('temas').transaction(t => [...(t || []), tema].slice(-60));
+    } else {
+      // sem IA no momento: repete o caso jogado há mais tempo (melhor do que travar)
+      const antigo = Object.entries(jogados).sort((a, b) => a[1].ts - b[1].ts).map(([id]) => CASES.find(c => c.id === id)).find(Boolean) || CASES[1];
+      caseData = { ...antigo, dossie: DOSSIES[antigo.id] };
+      toast('A IA não respondeu para criar um caso novo. Sorteamos um caso já jogado.');
+    }
+  }
+
+  // papéis: na primeira rodada, cara ou coroa; depois, os papéis já vêm trocados de "Próximo caso"
+  let players = room.players;
+  if(!players?.acusacao && !players?.defesa){
+    const [a, b] = Object.values(room.lobby || {});
+    const flip = Math.random() < 0.5;
+    players = room.solo ? { [flip ? 'acusacao' : 'defesa']: a } : { acusacao: flip ? a : b, defesa: flip ? b : a };
+  }
+  await histRef.child(`casos/${caseData.id}`).set({ titulo: caseData.titulo, ts: Date.now() });
+  const st = caseState(caseData);
+  const tx = await G.roomRef.child('phase').transaction(p => p === 'sorteio' ? st.phase : undefined);
+  if(!tx.committed) return;
+  await G.roomRef.update({ ...st, players });
+}
+
+// ══════════════════════════════════════════════════════
 // Contexto para a IA
 // ══════════════════════════════════════════════════════
 const PECA_NOME = { denuncia:'DENÚNCIA', resposta:'RESPOSTA À ACUSAÇÃO', alegacao:'ALEGAÇÕES FINAIS', replica:'RÉPLICA', treplica:'TRÉPLICA', apelacao:'APELAÇÃO', contrarrazoes:'CONTRARRAZÕES', acordo_proposta:'PROPOSTA DE ACORDO', acordo_resposta:'RESPOSTA AO ACORDO' };
@@ -141,6 +210,7 @@ function autoLine(a){
     case 'fase': return `— fase: ${a.fase} —`;
     case 'depoimento': return `[DEPOIMENTO de ${a.nome}] ${ROLE_LABEL[a.por]} perguntou: "${a.pergunta}" — Resposta: "${a.resposta}"${a.revelou ? ' (revelou fato novo)' : ''}`;
     case 'protesto': return `[PROTESTO da ${ROLE_LABEL[a.protestoPor]} contra pergunta da ${ROLE_LABEL[a.por]} a ${a.nome}: "${a.pergunta}"] Motivo: ${a.motivo}. Decisão: ${a.decisao} — ${a.texto}`;
+    case 'contradicao': return `[CONTRADIÇÃO apontada pela ${quem} no depoimento de ${a.nome}: "${a.alegacao}"] Juiz: ${a.procede ? 'PROCEDE' : 'NÃO PROCEDE'} — ${a.texto}`;
     case 'diligencia': return `[DILIGÊNCIA pedida pela ${quem}: "${a.pedido}"] Resultado: ${a.texto}`;
     case 'reviravolta': return `[FATO NOVO NOS AUTOS — ${a.titulo}] ${a.texto}`;
     case 'alegacao': return `[${PECA_NOME[a.subtipo] || 'ALEGAÇÕES'} — ${quem}] ${a.texto}${a.pedido ? ` (Pedido: ${a.pedido})` : ''}`;
@@ -160,57 +230,62 @@ function aiContext(room){
     niveis: { acusacao: nivelOf(room, 'acusacao'), defesa: nivelOf(room, 'defesa') },
     // falas das partes, para o motor local pontuar quando a IA estiver fora
     localMsgs: autos.filter(a => a.por === 'acusacao' || a.por === 'defesa')
-      .map(a => ({ role:a.por, text: a.tipo === 'depoimento' ? a.pergunta : (a.texto || '') }))
+      .map(a => ({ role:a.por, text: a.tipo === 'depoimento' ? a.pergunta : (a.texto || a.alegacao || '') }))
   };
 }
 
 // ══════════════════════════════════════════════════════
 // AÇÕES DOS JOGADORES
+// (sempre: primeiro a peça entra nos autos, depois o estado avança — senão o outro lado
+//  pode reagir antes de a peça aparecer na tela dele)
 // ══════════════════════════════════════════════════════
 function checkText(text, min = 10){
   if(!text || text.trim().length < min){ toast(`Escreva um pouco mais (mínimo ${min} caracteres).`); return false; }
   const m = moderate(text);
-  if(m.blocked){ toast(`⚠️ Linguagem imprópria para o tribunal: "${m.word}"`); return false; }
+  if(m.blocked){ toast(`Linguagem imprópria para o tribunal: "${m.word}"`); return false; }
   return true;
 }
 
-const actions = {
+export const actions = {
   // ── Acordo ──
   async proporAcordo(termos){
-    if(!checkText(termos)) return;
-    // sempre: primeiro a peça entra nos autos, depois o estado avança (senão o outro lado pode responder antes de ela aparecer)
+    if(!checkText(termos)) return false;
     await pushAuto({ tipo:'acordo_proposta', por:'acusacao', texto:termos });
     await G.roomRef.child('acordo').update({ status:'resposta', termos });
     clearDraft('acordo');
+    return true;
   },
   async semAcordo(){
     await pushAuto({ tipo:'nota', por:'sistema', texto:'A Acusação decidiu não oferecer acordo. O processo segue.' });
     await setPhase('acordo', 'denuncia');
+    return true;
   },
   async responderAcordo(aceita){
     await pushAuto({ tipo:'acordo_resposta', por:'defesa', texto: aceita ? 'A Defesa ACEITA o acordo.' : 'A Defesa RECUSA o acordo e vai a julgamento.' });
     if(aceita) await G.roomRef.child('acordo/status').set('homologando');
     else await setPhase('acordo', 'denuncia');
+    return true;
   },
 
   // ── Denúncia ──
   async enviarPeca(tipo, texto){
-    if(!checkText(texto, 30)) return;
+    if(!checkText(texto, 30)) return false;
     await pushAuto({ tipo, por: tipo === 'denuncia' ? 'acusacao' : 'defesa', texto });
     await G.roomRef.child(`pecas/${tipo}`).set(texto);
     clearDraft(tipo);
+    return true;
   },
 
   // ── Instrução ──
   async perguntar(testemunhaId, pergunta){
-    if(!testemunhaId){ toast('Escolha quem vai responder.'); return; }
-    if(!checkText(pergunta, 8)) return;
+    if(!testemunhaId){ toast('Escolha quem vai responder.'); return false; }
+    if(!checkText(pergunta, 8)) return false;
     const role = me();
-    const room = G.room;
-    if((room.instrucao.perguntas?.[role] || 0) >= room.instrucao.limite[role]){ toast('Você já usou todas as suas perguntas.'); return; }
+    if((G.room.instrucao.perguntas?.[role] || 0) >= G.room.instrucao.limite[role]){ toast('Você já usou todas as suas perguntas.'); return false; }
     const ok = await createPending(role, testemunhaId, pergunta);
-    if(!ok){ toast('Aguarde: ainda há uma pergunta sendo respondida.'); return; }
+    if(!ok){ toast('Aguarde: ainda há uma pergunta sendo respondida.'); return false; }
     clearDraft('pergunta');
+    return true;
   },
   async protestar(motivo){
     const role = me();
@@ -223,51 +298,70 @@ const actions = {
       ins.pending.protesto = { por: role, motivo };
       return ins;
     });
-    if(tx.committed) playSound('protest');
+    if(tx.committed){ playSound('protest'); vibrate([60, 40, 60]); }
     else toast('Tarde demais para protestar!');
   },
-  async encerrarPerguntas(){ await G.roomRef.child(`instrucao/pronto/${me()}`).set(true); },
+  async apontarContradicao(testemunhaId, alegacao){
+    if(!testemunhaId){ toast('Escolha de quem é a contradição.'); return false; }
+    if(!checkText(alegacao, 15)) return false;
+    const role = me();
+    const tx = await G.roomRef.child(`instrucao/contradicoes/${role}`).transaction(v => (v || 0) < MAX_CONTRADICOES ? (v || 0) + 1 : undefined);
+    if(!tx.committed){ toast('Você já usou suas duas acusações de contradição.'); return false; }
+    const ok = await withLock('O juiz confere a contradição nos autos…', room => runContradicao(room, role, testemunhaId, alegacao));
+    if(!ok){
+      await G.roomRef.child(`instrucao/contradicoes/${role}`).transaction(v => Math.max(0, (v || 1) - 1));
+      toast('O tribunal está ocupado. Tente de novo em instantes.');
+      return false;
+    }
+    clearDraft('contradicao');
+    return true;
+  },
+  async encerrarPerguntas(){ await G.roomRef.child(`instrucao/pronto/${me()}`).set(true); return true; },
   async toggleSilencio(v){
-    await G.roomRef.child('instrucao/silencio').set(v);
     await pushAuto({ tipo:'nota', por:'sistema', texto: v ? 'A Defesa orientou o réu a exercer o direito ao silêncio diante das perguntas da Acusação (Art. 5º, LXIII, CF).' : 'O réu vai responder a todas as perguntas.' });
+    await G.roomRef.child('instrucao/silencio').set(v);
   },
 
   // ── Cartas ──
   async cartaPergunta(){
-    if(!await useCard('pergunta')) return;
-    await G.roomRef.child(`instrucao/limite/${me()}`).transaction(v => (v || 0) + 2);
+    if(!await useCard('pergunta')) return false;
     await pushAuto({ tipo:'nota', por:'sistema', texto:`🃏 ${ROLE_LABEL[me()]} usou a carta "Perguntas extras" (+2 perguntas).` });
+    await G.roomRef.child(`instrucao/limite/${me()}`).transaction(v => (v || 0) + 2);
+    return true;
   },
   async cartaTempo(){
-    if(!await useCard('tempo')) return;
-    await G.roomRef.child('debates/extra').transaction(v => (v || 0) + 90);
+    if(!await useCard('tempo')) return false;
     await pushAuto({ tipo:'nota', por:'sistema', texto:`🃏 ${ROLE_LABEL[me()]} usou a carta "Mais tempo" (+90 segundos).` });
+    await G.roomRef.child('debates/extra').transaction(v => (v || 0) + 90);
+    return true;
   },
   async cartaDiligencia(pedido){
-    if(!checkText(pedido, 10)) return;
+    if(!checkText(pedido, 10)) return false;
     const role = me();
-    if(!(G.room.cartas?.[role]?.diligencia > 0)){ toast('Você não tem mais essa carta.'); return; }
+    if(!(G.room.cartas?.[role]?.diligencia > 0)){ toast('Você não tem mais essa carta.'); return false; }
     const ok = await withLock('O juiz analisa o pedido de diligência…', async room => {
       if(!await useCard('diligencia')) return;
       await runDiligencia(room, role, pedido);
     });
-    if(!ok) toast('O tribunal está ocupado. Tente de novo em instantes.');
-    else clearDraft('diligencia');
+    if(!ok){ toast('O tribunal está ocupado. Tente de novo em instantes.'); return false; }
+    clearDraft('diligencia');
+    return true;
   },
 
   // ── Debates ──
   async enviarAlegacao(texto, pedido, auto = false){
-    const room = G.room;
-    const t = room.debates.turno;
+    const t = G.room.debates.turno;
     const turno = TURNOS[t];
-    if(!auto && !checkText(texto, 20)) return;
-    if(t === 0 || t === 1){ if(!auto && !pedido?.trim()){ toast('Diga o que você pede ao juiz (ex.: "absolvição" ou "4 anos").'); return; } }
+    if(!auto && !checkText(texto, 20)) return false;
+    if(!auto && turno.tipo === 'alegacao' && !pedido?.trim()){ toast('Diga o que você pede ao juiz (ex.: "absolvição" ou "4 anos").'); return false; }
     await submitTurn(t, turno.role, texto || '(o tempo acabou sem manifestação)', pedido);
     clearDraft('alegacao_' + t); clearDraft('pedido');
+    return true;
   },
   async dispensarReplica(){
     const tx = await G.roomRef.child('debates/turno').transaction(t => t === 2 ? 4 : undefined);
     if(tx.committed) await pushAuto({ tipo:'nota', por:'sistema', texto:'A Acusação dispensou a réplica — por isso não há tréplica (Art. 476 CPP).' });
+    return true;
   },
 
   // ── Recurso ──
@@ -279,34 +373,37 @@ const actions = {
       return r;
     });
     if(tx.committed) await pushAuto({ tipo:'nota', por:'sistema', texto:`${ROLE_ICON[role]} ${ROLE_LABEL[role]} interpôs APELAÇÃO ao Tribunal de Justiça.` });
+    return true;
   },
   async aceitarDecisao(){
     const role = me();
-    await G.roomRef.child(`recurso/aceitou/${role}`).set(true);
     await pushAuto({ tipo:'nota', por:'sistema', texto:`${ROLE_ICON[role]} ${ROLE_LABEL[role]} aceitou a decisão.` });
+    await G.roomRef.child(`recurso/aceitou/${role}`).set(true);
+    return true;
   },
   async enviarRazoes(texto){
-    if(!checkText(texto, 30)) return;
+    if(!checkText(texto, 30)) return false;
     await pushAuto({ tipo:'apelacao', por: me(), texto });
     await G.roomRef.child('recurso').update({ razoes:texto, status:'contrarrazoes' });
     clearDraft('razoes');
+    return true;
   },
   async enviarContrarrazoes(texto, dispensar = false){
-    if(!dispensar && !checkText(texto, 20)) return;
+    if(!dispensar && !checkText(texto, 20)) return false;
     await pushAuto(dispensar ? { tipo:'nota', por:'sistema', texto:`${ROLE_LABEL[me()]} não apresentou contrarrazões.` } : { tipo:'contrarrazoes', por: me(), texto });
     await G.roomRef.child('recurso').update({ contrarrazoes: dispensar ? '' : texto, status:'julgando' });
     clearDraft('contrarrazoes');
+    return true;
   },
 
-  // ── Fim ──
-  async novoCaso(idx){
+  // ── Fim: próximo caso (sorteado), com os papéis trocados ──
+  async novoCaso(){
     const room = G.room;
-    const players = { acusacao: room.players.defesa || null, defesa: room.players.acusacao || null };
-    await G.roomRef.update({ ...initialRoomState(idx, G.cases), players, round:(room.round || 0) + 1 });
+    const players = { acusacao: room.players?.defesa || null, defesa: room.players?.acusacao || null };
+    await G.roomRef.update({ ...CLEAR_CASE, phase:'sorteio', players, tutorial:false, round:(room.round || 0) + 1 });
     // o listener de 'round' (main.js) recarrega os dois aparelhos
   }
 };
-export { actions };
 
 async function useCard(card){
   const tx = await G.roomRef.child(`cartas/${me()}/${card}`).transaction(v => (v || 0) > 0 ? v - 1 : undefined);
@@ -327,23 +424,34 @@ async function createPending(role, testemunhaId, pergunta){
 }
 
 async function submitTurn(t, role, texto, pedido){
-  const tx = await G.roomRef.child('debates').transaction(d => {
+  const atual = (await G.roomRef.child('debates/turno').once('value')).val();
+  if(atual !== t) return;
+  await pushAuto({ tipo:'alegacao', subtipo: TURNOS[t].tipo, por: role, texto, pedido: pedido || null });
+  await G.roomRef.child('debates').transaction(d => {
     if(!d || d.turno !== t) return undefined;
     d.turno = t + 1; d.inicio = now(); d.extra = 0;
-    if(pedido) { d.pedidos = d.pedidos || {}; d.pedidos[role] = pedido; }
+    if(pedido){ d.pedidos = d.pedidos || {}; d.pedidos[role] = pedido; }
     return d;
   });
-  if(tx.committed) await pushAuto({ tipo:'alegacao', subtipo: TURNOS[t].tipo, por: role, texto, pedido: pedido || null });
 }
 
 async function runDiligencia(room, role, pedido){
   const d = dossieOf(room);
   const revelados = room.fatosRevelados || [];
-  const ocultos = d.fatos_ocultos.map((f, i) => ({ f, i })).filter(x => !revelados.includes(x.i));
+  const ocultos = (d.fatos_ocultos || []).map((f, i) => ({ f, i })).filter(x => !revelados.includes(x.i));
   const r = await ask('diligencia', caseOf(room), { ...aiContext(room), por: role, pedido, fatos_ocultos: ocultos.map(x => x.f) });
   const usado = r.fato_usado >= 0 && ocultos[r.fato_usado] ? ocultos[r.fato_usado].i : null;
-  if(usado !== null) await G.roomRef.child('fatosRevelados').set([...revelados, usado]);
   await pushAuto({ tipo:'diligencia', por: role, pedido, texto: r.text, em_resumo: r.em_resumo, provider: r.provider });
+  if(usado !== null) await G.roomRef.child('fatosRevelados').set([...revelados, usado]);
+}
+
+async function runContradicao(room, role, testemunhaId, alegacao){
+  const t = witnessOf(room, testemunhaId);
+  const depoimentos = autosList(room).filter(a => a.tipo === 'depoimento' && a.testemunhaId === t.id).map(a => ({ pergunta:a.pergunta, resposta:a.resposta }));
+  const r = await ask('contradicao', caseOf(room), { ...aiContext(room), por: role, testemunha: t, depoimentos, alegacao });
+  await pushAuto({ tipo:'contradicao', por: role, testemunhaId: t.id, nome: t.nome, emoji: t.emoji, alegacao, procede: r.procede, texto: r.text, em_resumo: r.em_resumo, provider: r.provider });
+  await addScore({ [role]: r.procede ? 3 : -1 });
+  playSound(r.procede ? 'twist' : 'gavel');
 }
 
 // ══════════════════════════════════════════════════════
@@ -361,6 +469,12 @@ export async function autopilot(){
 }
 
 async function step(room){
+  if(room.phase === 'sorteio'){
+    const prontos = Object.keys(room.lobby || {}).length >= (room.solo ? 1 : 2);
+    if(prontos) return withLock('Sorteando o caso…', sortearCaso);
+    return;
+  }
+  if(!me()) return;
   const c = caseOf(room);
   const ai = aiRole(room);
 
@@ -433,6 +547,7 @@ async function step(room){
       if(r.status === 'decidir'){
         if(perdedores.every(p => r.aceitou?.[p])) return withLock('Encerrando o processo…', fr => finalizar(fr, fr.julgamento.vencedor, 'Ninguém recorreu: a sentença transitou em julgado.'));
         if(ai && perdedores.includes(ai) && !r.aceitou?.[ai]) return withLock(`A ${ROLE_LABEL[ai]} (IA) prepara a apelação…`, async fr => {
+          if(fr.recurso?.status !== 'decidir') return;
           const o = await ask('oponente', caseOf(fr), { ...aiContext(fr), papel: ai, tarefa:'apelacao', nivel_humano: nivelOf(fr, me()) });
           await pushAuto({ tipo:'nota', por:'sistema', texto:`${ROLE_ICON[ai]} ${ROLE_LABEL[ai]} interpôs APELAÇÃO ao Tribunal de Justiça.` });
           await pushAuto({ tipo:'apelacao', por: ai, texto: o.text });
@@ -440,6 +555,7 @@ async function step(room){
         });
       }
       if(r.status === 'contrarrazoes' && ai && r.apelante !== ai) return withLock(`A ${ROLE_LABEL[ai]} (IA) responde ao recurso…`, async fr => {
+        if(fr.recurso?.status !== 'contrarrazoes') return;
         const o = await ask('oponente', caseOf(fr), { ...aiContext(fr), papel: ai, tarefa:'contrarrazoes', nivel_humano: nivelOf(fr, me()) });
         await pushAuto({ tipo:'contrarrazoes', por: ai, texto: o.text });
         await G.roomRef.child('recurso').update({ contrarrazoes: o.text, status:'julgando' });
@@ -489,7 +605,7 @@ async function receberDenuncia(room){
   await pushAuto({ tipo:'decisao', por:'juiz', titulo:'Recebimento da denúncia', texto:r.text, em_resumo:r.em_resumo, comentarios:{ acusacao:r.comentario_acusacao, defesa:r.comentario_defesa }, pontos:r.pontos, provider:r.provider });
   await addScore(r.pontos);
   const lim = role => isAI(room, role) ? AI_PERGUNTAS : LIMITE_PERGUNTAS[nivelOf(room, role)];
-  await setPhase('denuncia', 'instrucao', { instrucao: { limite:{ acusacao: lim('acusacao'), defesa: lim('defesa') }, perguntas:{ acusacao:0, defesa:0 }, protestos:{ acusacao:0, defesa:0 }, pronto:{}, pending:null, silencio:false, reviravolta:false } });
+  await setPhase('denuncia', 'instrucao', { instrucao: { limite:{ acusacao: lim('acusacao'), defesa: lim('defesa') }, perguntas:{ acusacao:0, defesa:0 }, protestos:{ acusacao:0, defesa:0 }, contradicoes:{ acusacao:0, defesa:0 }, pronto:{}, pending:null, silencio:false, reviravolta:false } });
 }
 
 async function processPending(room){
@@ -527,13 +643,13 @@ async function processPending(room){
   if(resp.revelou_segredo) await addScore({ [pend.por]: 2 });
   await G.roomRef.child('instrucao/pending').remove();
 
-  // reviravolta: na metade das perguntas
+  // 1ª reviravolta: na metade das perguntas
   const ins = (await G.roomRef.child('instrucao').once('value')).val();
   const feitas = (ins.perguntas?.acusacao || 0) + (ins.perguntas?.defesa || 0);
   const total = (ins.limite?.acusacao || 0) + (ins.limite?.defesa || 0);
-  if(!ins.reviravolta && feitas >= Math.ceil(total / 2)){
+  const rv = twistsOf(room)[0];
+  if(rv && !ins.reviravolta && feitas >= Math.ceil(total / 2)){
     await G.roomRef.child('instrucao/reviravolta').set(true);
-    const rv = dossieOf(room).reviravolta;
     await pushAuto({ tipo:'reviravolta', por:'sistema', titulo: rv.titulo, texto: rv.texto });
   }
 }
@@ -553,12 +669,15 @@ async function encerrarInstrucao(room){
   if(rito === 'juri' && !room.pronuncia){
     const r = await ask('pronuncia', caseOf(room), aiContext(room));
     rito = r.decisao === 'pronuncia' ? 'juri' : 'comum';
-    await G.roomRef.update({ pronuncia: { decisao:r.decisao, crime:r.crime }, rito });
     await pushAuto({ tipo:'pronuncia', por:'juiz', titulo: r.decisao === 'pronuncia' ? 'PRONÚNCIA — o réu vai a Júri' : 'DESCLASSIFICAÇÃO — sem Júri', decisao:r.decisao, crime:r.crime, texto:r.text, em_resumo:r.em_resumo, provider:r.provider });
+    await G.roomRef.update({ pronuncia: { decisao:r.decisao, crime:r.crime }, rito });
     await addScore(r.pontos);
     playSound('gavel');
   }
-  await setPhase('instrucao', 'debates', { debates: { turno:0, inicio: now(), extra:0, pedidos:{} } });
+  const ok = await setPhase('instrucao', 'debates', { debates: { turno:0, inicio: now() + 4000, extra:0, pedidos:{} } });
+  // 2ª reviravolta: chega antes dos debates, para virar as alegações de cabeça para baixo
+  const rv2 = twistsOf(room)[1];
+  if(ok && rv2) await pushAuto({ tipo:'reviravolta', por:'sistema', titulo: rv2.titulo, texto: rv2.texto });
 }
 
 async function aiAlegacao(room, t){
@@ -630,90 +749,105 @@ async function finalizar(room, vencedor, texto){
 // ══════════════════════════════════════════════════════
 const renderedAutos = new Set();
 let firstAutosRender = true;
+let lastCaseId = null;
 
 export function render(){
   const room = G.room; if(!room) return;
+  if(room.caseData && room.caseData.id !== lastCaseId){
+    lastCaseId = room.caseData.id;
+    G.onCase?.(room);
+  }
   renderTop(room);
   renderAutos(room);
   renderPending(room);
   renderBusy(room);
   renderPanel(room);
-  renderNewEvidence(newEvidence(room));
+  renderReveal(room);
 }
 
-function newEvidence(room){
+export function newEvidence(room = G.room){
   return autosList(room).filter(a => a.tipo === 'diligencia' || a.tipo === 'reviravolta').map(a => a.tipo === 'reviravolta' ? `${a.titulo}: ${a.texto}` : a.texto);
 }
 
 function renderTop(room){
   const s = room.score || {};
-  $('top-score').innerHTML = `<span class="ts-acu" title="${escapeHtml(nameOf(room, 'acusacao'))}">⚔️ ${s.acusacao || 0}</span><span class="ts-x">×</span><span class="ts-def" title="${escapeHtml(nameOf(room, 'defesa'))}">${s.defesa || 0} 🛡️</span>`;
+  const mine = me();
+  $('top-score').innerHTML = mine
+    ? `<span class="sc ${mine}">${s[mine] || 0}</span><span class="sc-x">×</span><span class="sc ${otherRole(mine)}">${s[otherRole(mine)] || 0}</span>`
+    : '';
   $('sc-acu').textContent = s.acusacao || 0;
   $('sc-def').textContent = s.defesa || 0;
-  $('sc-acu-label').textContent = `⚔️ ${nameOf(room, 'acusacao')}`;
-  $('sc-def-label').textContent = `🛡️ ${nameOf(room, 'defesa')}`;
+  $('sc-acu-label').textContent = nameOf(room, 'acusacao');
+  $('sc-def-label').textContent = nameOf(room, 'defesa');
+  $('gtb-title').textContent = room.caseData?.nome || 'Sorteando…';
 
   const d = dossieOf(room);
   const steps = [d.acordo && 'acordo', 'denuncia', 'instrucao', d.rito === 'juri' && 'pronuncia', 'debates', 'julgamento', 'recurso', 'fim'].filter(Boolean);
   const order = ['acordo', 'denuncia', 'instrucao', 'pronuncia', 'debates', 'julgamento', 'recurso', 'fim'];
-  // a pronúncia acontece no fim da instrução
   const cur = room.phase === 'instrucao' && room.pronuncia ? 'debates' : room.phase;
   const curIdx = order.indexOf(cur);
-  $('phase-stepper').innerHTML = steps.map(p => {
+  $('phase-stepper').innerHTML = room.phase === 'sorteio' ? '' : steps.map(p => {
     const i = order.indexOf(p);
     const st = i < curIdx || (p === 'pronuncia' && room.pronuncia) ? 'done' : p === cur ? 'now' : '';
-    return `<div class="step ${st}"><span>${FASES[p].icon}</span><small>${FASES[p].nome}</small></div>`;
-  }).join('<div class="step-line"></div>');
+    return `<div class="step ${st}" title="${FASES[p].nome}"><i></i>${p === cur ? `<span>${FASES[p].nome}</span>` : ''}</div>`;
+  }).join('');
 }
 
 function roleBubbleClass(role){ return `${role} ${role === me() ? 'mine' : 'theirs'}`; }
-function providerTag(p){ return p ? `<span class="prov">⚡ ${escapeHtml(p)}</span>` : ''; }
-function resumoHtml(t){ return t ? `<div class="em-resumo">📢 <strong>Em resumo:</strong> ${escapeHtml(t)}</div>` : ''; }
+function providerTag(p){ return p && p !== 'regra' ? `<span class="prov">${p === 'local' ? 'offline' : escapeHtml(p)}</span>` : ''; }
+function resumoHtml(t){ return t ? `<div class="em-resumo"><b>Em resumo</b>${escapeHtml(t)}</div>` : ''; }
+function avatar(emoji, cls = ''){ return `<span class="avatar ${cls}">${emoji || '🧑'}</span>`; }
 function dosimetriaHtml(d){
   if(!d || !d.pena_final) return '';
-  return `<div class="dosi"><div class="dosi-title">Dosimetria da pena</div>
-    ${d.fase1 ? `<div class="dosi-row"><span>1ª fase</span>${escapeHtml(d.fase1)}</div>` : ''}
-    ${d.fase2 ? `<div class="dosi-row"><span>2ª fase</span>${escapeHtml(d.fase2)}</div>` : ''}
-    ${d.fase3 ? `<div class="dosi-row"><span>3ª fase</span>${escapeHtml(d.fase3)}</div>` : ''}
-    <div class="dosi-final">${escapeHtml(d.pena_final)}${d.regime ? ` · regime ${escapeHtml(d.regime)}` : ''}</div></div>`;
+  return `<div class="dosi"><div class="dosi-title">Dosimetria</div>
+    ${d.fase1 ? `<div class="dosi-row"><span>1ª</span>${escapeHtml(d.fase1)}</div>` : ''}
+    ${d.fase2 ? `<div class="dosi-row"><span>2ª</span>${escapeHtml(d.fase2)}</div>` : ''}
+    ${d.fase3 ? `<div class="dosi-row"><span>3ª</span>${escapeHtml(d.fase3)}</div>` : ''}
+    <div class="dosi-final">${escapeHtml(d.pena_final)}${d.regime ? `<small>regime ${escapeHtml(d.regime)}</small>` : ''}</div></div>`;
 }
 
 function autoHtml(a){
   const room = G.room;
-  const who = r => `${ROLE_ICON[r] || ''} ${escapeHtml(nameOf(room, r))}`;
+  const who = r => `<b class="who ${r}">${escapeHtml(nameOf(room, r))}</b>`;
   switch(a.tipo){
-    case 'fase': return `<div class="auto-fase">${escapeHtml(a.texto)}</div>`;
+    case 'fase': {
+      const f = FASES[a.fase]; if(!f) return '';
+      const meu = f[me()];
+      return `<div class="phase-card"><div class="pc-icon">${f.icon}</div><div class="pc-name">${f.nome}</div><div class="pc-text">${escapeHtml(f.o_que)}</div>${meu ? `<div class="pc-goal"><b>Seu objetivo</b>${escapeHtml(meu)}</div>` : ''}</div>`;
+    }
     case 'nota': return `<div class="auto-nota">${escapeHtml(a.texto)}</div>`;
     case 'denuncia': case 'resposta': case 'apelacao': case 'contrarrazoes': case 'acordo_proposta': case 'acordo_resposta': case 'alegacao': {
       const nome = a.tipo === 'alegacao' ? (PECA_NOME[a.subtipo] || 'ALEGAÇÕES') : (PECA_NOME[a.tipo] || 'MANIFESTAÇÃO');
-      return `<div class="peca ${roleBubbleClass(a.por)}"><div class="peca-head">${who(a.por)} · <span>${nome}</span></div><div class="peca-body">${nl2br(a.texto)}${a.pedido ? `<div class="peca-pedido">Pede: <strong>${escapeHtml(a.pedido)}</strong></div>` : ''}</div></div>`;
+      return `<div class="bubble ${roleBubbleClass(a.por)}"><div class="b-head">${who(a.por)}<span>${nome.toLowerCase()}</span></div><div class="b-body">${nl2br(a.texto)}</div>${a.pedido ? `<div class="b-pedido">Pede <b>${escapeHtml(a.pedido)}</b></div>` : ''}</div>`;
     }
     case 'decisao': case 'acordo_decisao': case 'pronuncia': {
-      const com = a.comentarios ? ['acusacao', 'defesa'].filter(r => a.comentarios[r]).map(r => `<div class="judge-fb ${r}">${ROLE_ICON[r]} ${escapeHtml(a.comentarios[r])}${a.pontos ? ` <b>+${a.pontos[r] || 0}</b>` : ''}</div>`).join('') : '';
-      return `<div class="judge-card gloss"><div class="jc-head">🧑‍⚖️ Dr. Augusto Melo · ${escapeHtml(a.titulo || 'Decisão')}${providerTag(a.provider)}</div><div class="jc-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}${com}</div>`;
+      const com = a.comentarios ? ['acusacao', 'defesa'].filter(r => a.comentarios[r]).map(r => `<div class="fb ${r}"><span>${escapeHtml(nameOf(room, r))}${a.pontos ? ` <b>+${a.pontos[r] || 0}</b>` : ''}</span>${escapeHtml(a.comentarios[r])}</div>`).join('') : '';
+      return `<div class="judge gloss"><div class="j-head">${avatar('🧑‍⚖️', 'judge')}<div><b>Dr. Augusto Melo</b><small>${escapeHtml(a.titulo || 'Decisão')}</small></div>${providerTag(a.provider)}</div><div class="j-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}${com}</div>`;
     }
     case 'depoimento': {
-      const ind = a.protestoIndeferido ? `<div class="protest-mini">✋ Protesto da ${ROLE_LABEL[a.protestoIndeferido.por]} (${escapeHtml(a.protestoIndeferido.motivo)}) — <b>INDEFERIDO</b>: ${escapeHtml(a.protestoIndeferido.texto)}</div>` : '';
-      return `<div class="q-bubble ${roleBubbleClass(a.por)}"><div class="peca-head">${who(a.por)} → ${escapeHtml(a.nome)}</div><div class="peca-body">${nl2br(a.pergunta)}</div></div>${ind}
-        <div class="wit-answer gloss"><div class="wa-head"><span class="wa-emoji">${a.emoji}</span><div><div class="wa-name">${escapeHtml(a.nome)}</div><div class="wa-role">${escapeHtml(a.papel || '')}${a.tom ? ` · <i>${escapeHtml(a.tom)}</i>` : ''}</div></div>${providerTag(a.provider)}</div><div class="wa-body">"${nl2br(a.resposta)}"</div>${a.revelou ? `<div class="reveal">🔓 Revelou algo novo! <b>+2</b> para a ${ROLE_LABEL[a.por]}</div>` : ''}</div>`;
+      const ind = a.protestoIndeferido ? `<div class="ruling no">Protesto da ${ROLE_LABEL[a.protestoIndeferido.por]} (${escapeHtml(a.protestoIndeferido.motivo)}) <b>indeferido</b> — ${escapeHtml(a.protestoIndeferido.texto)}</div>` : '';
+      return `<div class="bubble q ${roleBubbleClass(a.por)}"><div class="b-head">${who(a.por)}<span>para ${escapeHtml(a.nome)}</span></div><div class="b-body">${nl2br(a.pergunta)}</div></div>${ind}
+        <div class="witness gloss"><div class="w-head">${avatar(a.emoji)}<div><b>${escapeHtml(a.nome)}</b><small>${escapeHtml(a.papel || '')}${a.tom ? ` · ${escapeHtml(a.tom)}` : ''}</small></div>${providerTag(a.provider)}</div><div class="w-body">${nl2br(a.resposta)}</div>${a.revelou ? `<div class="reveal">Segredo revelado · <b>+2</b> ${ROLE_LABEL[a.por]}</div>` : ''}</div>`;
     }
     case 'protesto':
-      return `<div class="q-bubble struck ${roleBubbleClass(a.por)}"><div class="peca-head">${who(a.por)} → ${escapeHtml(a.nome)}</div><div class="peca-body">${nl2br(a.pergunta)}</div></div>
-        <div class="judge-card protest gloss"><div class="jc-head">✋ PROTESTO da ${ROLE_LABEL[a.protestoPor]} · ${escapeHtml(a.motivo)}${providerTag(a.provider)}</div><div class="jc-body"><b>DEFERIDO.</b> ${escapeHtml(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
+      return `<div class="bubble q struck ${roleBubbleClass(a.por)}"><div class="b-head">${who(a.por)}<span>para ${escapeHtml(a.nome)}</span></div><div class="b-body">${nl2br(a.pergunta)}</div></div>
+        <div class="judge alert gloss"><div class="j-head">${avatar('✋', 'alert')}<div><b>Protesto deferido</b><small>${ROLE_LABEL[a.protestoPor]} · ${escapeHtml(a.motivo)}</small></div>${providerTag(a.provider)}</div><div class="j-body">${escapeHtml(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
+    case 'contradicao':
+      return `<div class="judge ${a.procede ? 'win' : 'alert'} gloss"><div class="j-head">${avatar('🎯', a.procede ? 'win' : 'alert')}<div><b>Contradição ${a.procede ? 'confirmada' : 'rejeitada'}</b><small>${escapeHtml(nameOf(room, a.por))} sobre ${escapeHtml(a.nome)} · ${a.procede ? '+3' : '−1'}</small></div>${providerTag(a.provider)}</div><div class="j-quote">“${escapeHtml(a.alegacao)}”</div><div class="j-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
     case 'diligencia':
-      return `<div class="judge-card dilig gloss"><div class="jc-head">🔍 Diligência pedida pela ${ROLE_LABEL[a.por]}${providerTag(a.provider)}</div><div class="dilig-ask">"${escapeHtml(a.pedido)}"</div><div class="jc-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
+      return `<div class="judge dilig gloss"><div class="j-head">${avatar('🔍', 'dilig')}<div><b>Diligência</b><small>pedida pela ${ROLE_LABEL[a.por]}</small></div>${providerTag(a.provider)}</div><div class="j-quote">“${escapeHtml(a.pedido)}”</div><div class="j-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
     case 'reviravolta':
-      return `<div class="twist-card"><div class="twist-head">⚡ REVIRAVOLTA</div><div class="twist-title">${escapeHtml(a.titulo)}</div><div class="twist-body">${escapeHtml(a.texto)}</div></div>`;
+      return `<div class="twist"><div class="t-kicker">Reviravolta</div><div class="t-title">${escapeHtml(a.titulo)}</div><div class="t-body">${escapeHtml(a.texto)}</div></div>`;
     case 'sentenca':
-      return `<div class="judge-card verdict gloss"><div class="jc-head">🔨 SENTENÇA${providerTag(a.provider)}</div><div class="verdict-dec">${escapeHtml(a.decisao)}</div><div class="jc-body">${nl2br(a.texto)}</div>${dosimetriaHtml(a.dosimetria)}${resumoHtml(a.em_resumo)}${melhoresHtml(a.melhor)}</div>`;
+      return `<div class="judge verdict gloss"><div class="j-head">${avatar('🔨', 'judge')}<div><b>Sentença</b><small>Dr. Augusto Melo</small></div>${providerTag(a.provider)}</div><div class="v-dec">${escapeHtml(a.decisao)}</div><div class="j-body">${nl2br(a.texto)}</div>${dosimetriaHtml(a.dosimetria)}${resumoHtml(a.em_resumo)}${melhoresHtml(a.melhor)}</div>`;
     case 'juri': {
       const condena = (a.votos || []).filter(v => v.voto === 'condena').length;
-      const votos = (a.votos || []).map((v, i) => `<div class="juror ${v.voto}" style="animation-delay:${i * 0.35}s"><span class="j-emoji">${v.emoji || '🧑'}</span><div class="j-name">${escapeHtml(v.nome)}</div><div class="j-vote">${v.voto === 'condena' ? '🔴 Condena' : '🟢 Absolve'}</div>${v.pensamento ? `<div class="j-thought">"${escapeHtml(v.pensamento)}"</div>` : ''}</div>`).join('');
-      return `<div class="judge-card verdict gloss"><div class="jc-head">👥 CONSELHO DE SENTENÇA${providerTag(a.provider)}</div><div class="jury-grid">${votos}</div><div class="verdict-dec">${escapeHtml(a.decisao)} · ${Math.max(condena, 7 - condena)} a ${Math.min(condena, 7 - condena)}</div><div class="jc-body">${nl2br(a.texto)}</div>${dosimetriaHtml(a.dosimetria)}${resumoHtml(a.em_resumo)}${melhoresHtml(a.melhor)}</div>`;
+      const votos = (a.votos || []).map((v, i) => `<div class="juror ${v.voto}" style="animation-delay:${i * 0.45}s">${avatar(v.emoji)}<b>${escapeHtml(v.nome)}</b><span class="vote">${v.voto === 'condena' ? 'Condena' : 'Absolve'}</span>${v.pensamento ? `<small>“${escapeHtml(v.pensamento)}”</small>` : ''}</div>`).join('');
+      return `<div class="judge verdict gloss"><div class="j-head">${avatar('👥', 'judge')}<div><b>Conselho de Sentença</b><small>7 jurados</small></div>${providerTag(a.provider)}</div><div class="jury">${votos}</div><div class="v-dec">${escapeHtml(a.decisao)} <small>${Math.max(condena, 7 - condena)} a ${Math.min(condena, 7 - condena)}</small></div><div class="j-body">${nl2br(a.texto)}</div>${dosimetriaHtml(a.dosimetria)}${resumoHtml(a.em_resumo)}${melhoresHtml(a.melhor)}</div>`;
     }
     case 'acordao': {
-      const votos = (a.votos || []).map((v, i) => `<div class="des-vote ${v.voto.replace(/\s/g, '-')}" style="animation-delay:${i * 0.5}s"><div class="dv-head"><span>${v.emoji}</span><div><b>${escapeHtml(v.nome)}</b><small>${escapeHtml(v.papel)}</small></div><div class="dv-voto">${escapeHtml(v.voto)}</div></div><div class="dv-body">${escapeHtml(v.fundamento)}</div></div>`).join('');
-      return `<div class="judge-card verdict gloss"><div class="jc-head">🏛️ TRIBUNAL DE JUSTIÇA · 1ª Câmara Criminal${providerTag(a.provider)}</div>${votos}<div class="verdict-dec">Recurso ${escapeHtml(a.resultado)}</div><div class="jc-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
+      const votos = (a.votos || []).map((v, i) => `<div class="des ${v.voto.replace(/\s/g, '-')}" style="animation-delay:${i * 0.6}s"><div class="d-head">${avatar(v.emoji)}<div><b>${escapeHtml(v.nome)}</b><small>${escapeHtml(v.papel)}</small></div><span class="d-vote">${escapeHtml(v.voto)}</span></div><div class="d-body">${escapeHtml(v.fundamento)}</div></div>`).join('');
+      return `<div class="judge verdict gloss"><div class="j-head">${avatar('🏛️', 'judge')}<div><b>Tribunal de Justiça</b><small>1ª Câmara Criminal</small></div>${providerTag(a.provider)}</div>${votos}<div class="v-dec">Recurso ${escapeHtml(a.resultado)}</div><div class="j-body">${nl2br(a.texto)}</div>${resumoHtml(a.em_resumo)}</div>`;
     }
     default: return `<div class="auto-nota">${escapeHtml(a.texto || '')}</div>`;
   }
@@ -721,7 +855,7 @@ function autoHtml(a){
 
 function melhoresHtml(m){
   if(!m || (!m.acusacao && !m.defesa)) return '';
-  return `<div class="best">${m.acusacao ? `<div class="judge-fb acusacao">⭐ ${escapeHtml(m.acusacao)}</div>` : ''}${m.defesa ? `<div class="judge-fb defesa">⭐ ${escapeHtml(m.defesa)}</div>` : ''}</div>`;
+  return `<div class="best">${['acusacao', 'defesa'].filter(r => m[r]).map(r => `<div class="fb ${r}"><span>Melhor momento · ${escapeHtml(nameOf(G.room, r))}</span>${escapeHtml(m[r])}</div>`).join('')}</div>`;
 }
 
 function renderAutos(room){
@@ -730,9 +864,11 @@ function renderAutos(room){
   for(const a of autosList(room)){
     if(renderedAutos.has(a.key)) continue;
     renderedAutos.add(a.key);
+    const html = autoHtml(a);
+    if(!html) continue;
     const el = document.createElement('div');
     el.className = 'auto-item' + (firstAutosRender ? '' : ' new');
-    el.innerHTML = autoHtml(a);
+    el.innerHTML = html;
     el.querySelectorAll('.gloss').forEach(applyGlossary);
     box.appendChild(el);
     added++; lastTipo = a.tipo;
@@ -740,105 +876,179 @@ function renderAutos(room){
   if(!added) return;
   const wasFirst = firstAutosRender;
   firstAutosRender = false;
-  box.scrollTop = box.scrollHeight;
+  scrollAutos(!wasFirst);
   if(wasFirst) return;
-  if(lastTipo === 'reviravolta') playSound('twist');
+  if(lastTipo === 'reviravolta'){ playSound('twist'); vibrate([90, 60, 90, 60, 160]); }
+  else if(['sentenca', 'juri', 'acordao'].includes(lastTipo)){ vibrate([200, 80, 200]); }
   else if(['decisao', 'pronuncia', 'acordo_decisao', 'diligencia'].includes(lastTipo)) playSound('judge');
   else if(lastTipo !== 'fase') playSound('message');
-  if(!document.querySelector('.btab[data-tab="audiencia"]')?.classList.contains('active')) $('aud-notif')?.classList.add('show');
+  if(!document.querySelector('.nav-btn[data-tab="audiencia"]')?.classList.contains('active')) $('aud-notif')?.classList.add('show');
+}
+
+function scrollAutos(smooth){
+  const box = $('autos-scroll'); if(!box) return;
+  box.scrollTo({ top: box.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 
 function renderPending(room){
   const slot = $('pending-slot'); if(!slot) return;
   const pend = room.phase === 'instrucao' ? room.instrucao?.pending : null;
-  if(!pend){ slot.innerHTML = ''; slot.dataset.key = ''; return; }
+  if(!pend){ if(slot.dataset.key){ slot.innerHTML = ''; slot.dataset.key = ''; } return; }
   const open = !pend.protesto && now() < pend.ts + PROTEST_WINDOW_MS;
-  const canProtest = open && pend.por !== me() && !isAI(room, me()) && (room.instrucao.protestos?.[me()] || 0) < MAX_PROTESTOS;
+  const canProtest = open && pend.por !== me() && (room.instrucao.protestos?.[me()] || 0) < MAX_PROTESTOS;
   const key = `${pend.id}|${open}|${Boolean(pend.protesto)}|${canProtest}`;
   if(slot.dataset.key === key) return;
+  const isNew = !slot.dataset.key?.startsWith(pend.id);
   slot.dataset.key = key;
   const t = witnessOf(room, pend.testemunhaId);
   const status = pend.protesto
-    ? `<div class="pend-status protest-call">✋ PROTESTO da ${ROLE_LABEL[pend.protesto.por]}! O juiz vai decidir…</div>`
-    : open ? `<div class="pend-status">⏳ ${pend.por === me() ? 'O adversário pode protestar…' : 'Você pode protestar contra esta pergunta'} <b data-until="${pend.ts + PROTEST_WINDOW_MS}"></b></div>`
-    : `<div class="pend-status">💬 ${escapeHtml(t?.nome || 'A testemunha')} está pensando…</div>`;
-  const protest = canProtest ? `<div class="protest-box"><button class="protest-btn" type="button">✋ PROTESTO, EXCELÊNCIA!</button><div class="protest-motivos">${MOTIVOS_PROTESTO.map(m => `<button type="button" class="motivo" data-motivo="${m.id}"><b>${m.label}</b><small>${m.desc}</small></button>`).join('')}</div><div class="protest-left">Protestos restantes: ${MAX_PROTESTOS - (room.instrucao.protestos?.[me()] || 0)} · protesto sem razão custa 1 ponto</div></div>` : '';
-  slot.innerHTML = `<div class="q-bubble live ${roleBubbleClass(pend.por)}"><div class="peca-head">${ROLE_ICON[pend.por]} ${escapeHtml(nameOf(room, pend.por))} → ${t?.emoji || ''} ${escapeHtml(t?.nome || '')}</div><div class="peca-body">${nl2br(pend.pergunta)}</div></div>${status}${protest}`;
+    ? `<div class="pend-status hot">Protesto da ${ROLE_LABEL[pend.protesto.por]}! O juiz vai decidir…</div>`
+    : open ? `<div class="pend-status">${pend.por === me() ? 'O adversário pode protestar' : 'Você pode protestar'} <b data-until="${pend.ts + PROTEST_WINDOW_MS}"></b></div>`
+    : `<div class="pend-status">${escapeHtml(t?.nome || 'A testemunha')} está pensando…</div>`;
+  const protest = canProtest ? `<div class="protest"><button class="protest-btn" type="button">Protesto, Excelência!</button><div class="motivos">${MOTIVOS_PROTESTO.map(m => `<button type="button" class="motivo" data-motivo="${m.id}"><b>${m.label}</b><small>${m.desc}</small></button>`).join('')}</div><small class="protest-left">Restam ${MAX_PROTESTOS - (room.instrucao.protestos?.[me()] || 0)} · protesto sem razão custa 1 ponto</small></div>` : '';
+  slot.innerHTML = `<div class="pending ${roleBubbleClass(pend.por)}"><div class="b-head"><b class="who ${pend.por}">${escapeHtml(nameOf(room, pend.por))}</b><span>para ${t?.emoji || ''} ${escapeHtml(t?.nome || '')}</span></div><div class="b-body">${nl2br(pend.pergunta)}</div>${status}${protest}</div>`;
   if(canProtest){
-    const box = slot.querySelector('.protest-box');
+    const box = slot.querySelector('.protest');
     slot.querySelector('.protest-btn').addEventListener('click', () => box.classList.add('open'));
     slot.querySelectorAll('.motivo').forEach(b => b.addEventListener('click', () => actions.protestar(b.dataset.motivo)));
-    playSound('tick');
+    if(isNew){ playSound('tick'); vibrate(80); }
   }
-  $('autos').scrollTop = $('autos').scrollHeight;
+  scrollAutos(true);
 }
 
 function renderBusy(room){
   const b = room.judge_busy;
   const show = b && now() - (b.ts || 0) < LOCK_MS;
-  $('busy-slot').innerHTML = show ? `<div class="busy"><span class="busy-dots"><i></i><i></i><i></i></span>${escapeHtml(b.label || 'O tribunal está deliberando…')}</div>` : '';
+  const html = show ? `<div class="busy"><span class="dots"><i></i><i></i><i></i></span>${escapeHtml(b.label || 'O tribunal está deliberando…')}</div>` : '';
+  if($('busy-slot').innerHTML !== html){ $('busy-slot').innerHTML = html; if(html) scrollAutos(true); }
 }
 
-// ── Painel de ação (o que EU posso fazer agora) ──
+// ── Revelação do caso sorteado ("abertura do envelope") ──
+function renderReveal(room){
+  const el = $('reveal'); if(!el) return;
+  if(room.phase === 'sorteio'){
+    el.className = 'reveal-screen show drawing';
+    el.innerHTML = `<div class="envelope"><div class="env-flap"></div><div class="env-body">⚖️</div></div><div class="rv-title">Sorteando o caso…</div><div class="rv-sub">${room.solo ? 'Você contra a IA' : 'Nenhum de vocês sabe qual vai ser'}</div>`;
+    return;
+  }
+  const key = `reveal_${G.code}_${room.round || 0}`;
+  if(!room.caseData || !me() || sessionStorage.getItem(key)) { if(el.classList.contains('drawing')) el.className = 'reveal-screen'; return; }
+  sessionStorage.setItem(key, '1');
+  const c = room.caseData;
+  el.className = 'reveal-screen show opened';
+  el.innerHTML = `<div class="rv-card">
+      <div class="rv-kicker">${c.gerado ? 'Caso inédito' : c.tutorial ? 'Caso de treino' : `Caso ${escapeHtml(c.id)}`}</div>
+      <div class="rv-name">${escapeHtml(c.nome)}</div>
+      <div class="rv-tags">${(c.tags || []).map(t => `<span>${escapeHtml(t.t)}</span>`).join('')}</div>
+      <div class="rv-role ${me()}"><small>Você é a</small>${ROLE_LABEL[me()]}</div>
+      <div class="rv-vs">contra <b>${escapeHtml(nameOf(room, otherRole(me())))}</b></div>
+      <button class="btn btn-primary" type="button" data-close>Abrir o processo</button>
+    </div>`;
+  playSound('twist'); vibrate([80, 50, 80]);
+  el.querySelector('[data-close]').addEventListener('click', () => { el.className = 'reveal-screen'; G.onRevealClosed?.(); });
+}
+
+// ══════════════════════════════════════════════════════
+// BARRA DE VEZ + GAVETA DE AÇÃO
+// ══════════════════════════════════════════════════════
 let panelKey = '';
+let lastMine = false;
+let currentPanel = null;
+
 function renderPanel(room){
-  const p = panelFor(room);
-  const info = phaseInfoHtml(room);
+  const p = room.phase === 'sorteio' ? { key:'sorteio', mine:false, title:'Sorteando o caso…', html:'' } : panelFor(room);
+  currentPanel = p;
   const key = `${room.phase}|${p.key}`;
+  renderBar(p);
+  if(p.mine && !lastMine){ vibrate([70, 40, 70]); playSound('turn'); flashTitle(); }
+  lastMine = p.mine;
   if(key === panelKey) return;
   panelKey = key;
-  $('phase-info').innerHTML = info;
   const el = $('action-panel');
-  el.innerHTML = p.html;
+  el.innerHTML = p.html || '';
   // restaura rascunhos e liga os campos de texto
   el.querySelectorAll('textarea[data-draft], input[data-draft]').forEach(ta => {
     ta.value = loadDraft(ta.dataset.draft);
-    ta.addEventListener('input', () => { saveDraft(ta.dataset.draft, ta.value); if(ta.tagName === 'TEXTAREA') autoGrow(ta); const cnt = ta.parentElement.querySelector('.char-count'); if(cnt) cnt.textContent = `${ta.value.length} caracteres`; });
-    if(ta.tagName === 'TEXTAREA') autoGrow(ta);
+    ta.addEventListener('input', () => { saveDraft(ta.dataset.draft, ta.value); if(ta.tagName === 'TEXTAREA') autoGrow(ta, 260); });
+    if(ta.tagName === 'TEXTAREA') autoGrow(ta, 260);
   });
   p.bind?.(el);
+  // a gaveta só fica aberta se ainda houver algo para eu fazer nela
+  if(!p.html) closeSheet();
+  if(p.autoOpen) openSheet();
 }
 
-function phaseInfoHtml(room){
-  const f = FASES[room.phase]; if(!f) return '';
-  const tutorial = caseOf(room).tutorial;
-  const meu = f[me()];
-  return `<details class="phase-info" ${tutorial || nivelOf(room, me()) === 'estagiario' ? 'open' : ''}><summary>${f.icon} <b>${f.nome}</b> — o que acontece agora?</summary><div class="pi-body">${escapeHtml(f.o_que)}${meu ? `<div class="pi-goal">🎯 <b>Seu objetivo:</b> ${escapeHtml(meu)}</div>` : ''}</div></details>`;
+function renderBar(p){
+  const bar = $('action-bar'); if(!bar) return;
+  bar.className = `action-bar ${p.mine ? 'mine' : ''} ${p.html ? 'has-sheet' : ''}`;
+  const html = `<div class="ab-text">${p.mine ? '<span class="ab-kicker">Sua vez</span>' : ''}<span class="ab-title">${p.title || ''}</span>${p.status ? `<span class="ab-status">${p.status}</span>` : ''}</div>${p.html ? `<button class="btn ${p.mine ? 'btn-primary' : 'btn-ghost'} ab-open" type="button">${p.cta || 'Abrir'}</button>` : '<span class="ab-wait"><i></i><i></i><i></i></span>'}`;
+  if(bar.dataset.html === html) return;
+  bar.dataset.html = html;
+  bar.innerHTML = html;
+  bar.querySelector('.ab-open')?.addEventListener('click', openSheet);
 }
 
-function waitHtml(text){ return `<div class="wait">⏳ ${text}</div>`; }
-function btn(id, label, cls = 'btn-primary'){ return `<button type="button" class="${cls}" data-act="${id}">${label}</button>`; }
-function textarea(draft, ph, rows = 4){ return `<div class="ta-wrap"><textarea class="act-ta" data-draft="${draft}" rows="${rows}" placeholder="${escapeHtml(ph)}"></textarea><div class="char-count">0 caracteres</div></div>`; }
-function on(el, act, fn){ el.querySelector(`[data-act="${act}"]`)?.addEventListener('click', async e => { const b = e.currentTarget; b.disabled = true; try{ await fn(); } finally { b.disabled = false; } }); }
+export function openSheet(){
+  const s = $('sheet'); if(!s || !currentPanel?.html) return;
+  s.classList.add('open');
+  document.body.classList.add('sheet-open');
+  setTimeout(() => s.querySelector('textarea:not([disabled])')?.focus({ preventScroll:true }), 260);
+}
+export function closeSheet(){
+  $('sheet')?.classList.remove('open');
+  document.body.classList.remove('sheet-open');
+  document.activeElement?.blur?.();
+}
+
+let titleTimer = null;
+function flashTitle(){
+  if(!document.hidden) return;
+  const base = document.title;
+  let on = false;
+  clearInterval(titleTimer);
+  titleTimer = setInterval(() => { document.title = (on = !on) ? '⚖️ Sua vez!' : base; }, 900);
+  const stop = () => { if(!document.hidden){ clearInterval(titleTimer); document.title = base; document.removeEventListener('visibilitychange', stop); } };
+  document.addEventListener('visibilitychange', stop);
+}
+
+function waitP(key, title, status){ return { key, mine:false, title, status, html:'' }; }
+function btn(id, label, cls = 'btn-primary'){ return `<button type="button" class="btn ${cls}" data-act="${id}">${label}</button>`; }
+function textarea(draft, ph, rows = 4){ return `<textarea class="field" data-draft="${draft}" rows="${rows}" placeholder="${escapeHtml(ph)}"></textarea>`; }
+// liga um botão a uma ação; se a ação der certo, fecha a gaveta
+function on(el, act, fn){
+  el.querySelector(`[data-act="${act}"]`)?.addEventListener('click', async e => {
+    const b = e.currentTarget; b.disabled = true; b.classList.add('loading');
+    try{ const ok = await fn(); if(ok) closeSheet(); }
+    finally{ b.disabled = false; b.classList.remove('loading'); }
+  });
+}
 const val = (el, draft) => el.querySelector(`[data-draft="${draft}"]`)?.value.trim() || '';
+const sheetHead = (title, hint) => `<div class="sh-title">${title}</div>${hint ? `<div class="sh-hint">${hint}</div>` : ''}`;
 
 function cartasHtml(room, allowed){
   const c = room.cartas?.[me()] || {};
   const cards = [
-    { id:'diligencia', icon:'🔍', nome:'Diligência', desc:'Pede uma investigação extra. O resultado vale para os dois lados.' },
-    { id:'pergunta', icon:'➕', nome:'Perguntas extras', desc:'+2 perguntas na instrução.' },
-    { id:'tempo', icon:'⏱', nome:'Mais tempo', desc:'+90 segundos na sua fala.' }
+    { id:'diligencia', icon:'🔍', nome:'Diligência', desc:'investigação extra' },
+    { id:'pergunta', icon:'➕', nome:'+2 perguntas', desc:'na instrução' },
+    { id:'tempo', icon:'⏱', nome:'+90 segundos', desc:'na sua fala' }
   ].filter(k => allowed.includes(k.id));
-  return `<div class="cards-row">${cards.map(k => `<button type="button" class="game-card ${c[k.id] > 0 ? '' : 'used'}" data-card="${k.id}" ${c[k.id] > 0 ? '' : 'disabled'} title="${escapeHtml(k.desc)}"><span>${k.icon}</span><b>${k.nome}</b><small>${c[k.id] > 0 ? k.desc : 'já usada'}</small></button>`).join('')}</div>`;
+  return `<div class="cards">${cards.map(k => `<button type="button" class="gcard ${c[k.id] > 0 ? '' : 'used'}" data-card="${k.id}" ${c[k.id] > 0 ? '' : 'disabled'}><span>${k.icon}</span><b>${k.nome}</b><small>${c[k.id] > 0 ? k.desc : 'usada'}</small></button>`).join('')}</div>`;
 }
 
 function bindCartas(el){
-  el.querySelectorAll('.game-card').forEach(b => b.addEventListener('click', async () => {
+  el.querySelectorAll('.gcard').forEach(b => b.addEventListener('click', async () => {
     const k = b.dataset.card;
     if(k === 'pergunta') return actions.cartaPergunta();
     if(k === 'tempo') return actions.cartaTempo();
-    if(k === 'diligencia'){
-      const box = el.querySelector('.dilig-form');
-      box.classList.toggle('open');
-      box.querySelector('textarea')?.focus();
-    }
+    if(k === 'diligencia'){ const box = el.querySelector('.sub-form.dilig'); box.classList.toggle('open'); box.querySelector('textarea')?.focus(); }
   }));
   on(el, 'diligencia', () => actions.cartaDiligencia(val(el, 'diligencia')));
 }
-const diligFormHtml = () => `<div class="dilig-form">${textarea('diligencia', 'O que você quer que seja investigado? Ex.: "perícia no celular do réu", "ouvir o dono da farmácia 24h", "laudo da câmera do corredor"', 2)}${btn('diligencia', '🔍 Requerer diligência', 'btn-secondary')}</div>`;
+const diligFormHtml = () => `<div class="sub-form dilig">${textarea('diligencia', 'O que deve ser investigado? Ex.: "perícia no celular do réu", "imagens da câmera do corredor"', 2)}${btn('diligencia', 'Requerer diligência', 'btn-secondary')}</div>`;
 
 function panelFor(room){
   const role = me();
+  if(!role) return waitP('?', 'Assistindo', '');
   const opp = otherRole(role);
   const oppName = escapeHtml(nameOf(room, opp));
 
@@ -846,100 +1056,111 @@ function panelFor(room){
     case 'acordo': {
       const a = room.acordo || {};
       if(a.status === 'proposta'){
-        if(role === 'acusacao') return { key:'acu-proposta', html:`
-          <div class="act-title">🤝 Oferecer acordo de não persecução penal?</div>
-          <div class="act-hint">Requisitos (Art. 28-A CPP): crime sem violência, pena mínima menor que 4 anos e confissão. Condições comuns: prestação de serviços, reparação do dano, multa.</div>
-          ${textarea('acordo', 'Condições do acordo. Ex.: "confissão, reparação integral do dano em 30 dias e 8 meses de prestação de serviços à comunidade"', 3)}
-          <div class="btn-row">${btn('propor', '🤝 Propor acordo')}${btn('sem', 'Não oferecer — seguir com a denúncia', 'btn-secondary')}</div>`,
+        if(role === 'acusacao') return { key:'acu-proposta', mine:true, title:'Oferecer acordo?', cta:'Decidir', html:`
+          ${sheetHead('Oferecer acordo de não persecução penal?', 'Cabe em crime sem violência, com pena mínima menor que 4 anos e confissão. Condições comuns: prestação de serviços, reparação do dano, multa.')}
+          ${textarea('acordo', 'Ex.: confissão, reparação integral do dano em 30 dias e 8 meses de prestação de serviços à comunidade', 3)}
+          <div class="row">${btn('sem', 'Não oferecer', 'btn-secondary')}${btn('propor', 'Propor acordo')}</div>`,
           bind: el => { on(el, 'propor', () => actions.proporAcordo(val(el, 'acordo'))); on(el, 'sem', () => actions.semAcordo()); } };
-        return { key:'def-espera-proposta', html: waitHtml(`${oppName} está decidindo se oferece um acordo. Enquanto isso, leia o caso na aba 📋 CASO.`) };
+        return waitP('def-espera-proposta', `${oppName} decide se oferece acordo`, 'Leia o caso enquanto isso');
       }
       if(a.status === 'resposta'){
-        if(role === 'defesa') return { key:'def-resposta', html:`
-          <div class="act-title">🤝 A Acusação ofereceu um acordo</div>
-          <div class="offer">"${nl2br(a.termos)}"</div>
-          <div class="act-hint">Se aceitar, o réu confessa e cumpre as condições, e o processo acaba aqui (o juiz ainda precisa homologar). Se recusar, vai a julgamento: pode ser absolvido… ou condenado.</div>
-          <div class="btn-row">${btn('aceitar', '✅ Aceitar acordo')}${btn('recusar', '❌ Recusar e ir a julgamento', 'btn-secondary')}</div>`,
+        if(role === 'defesa') return { key:'def-resposta', mine:true, title:'Proposta de acordo recebida', cta:'Responder', autoOpen:true, html:`
+          ${sheetHead('A Acusação ofereceu um acordo', 'Se aceitar, o réu confessa, cumpre as condições e o processo acaba aqui (o juiz ainda precisa homologar). Se recusar, vai a julgamento.')}
+          <div class="offer">${nl2br(a.termos)}</div>
+          <div class="row">${btn('recusar', 'Recusar', 'btn-secondary')}${btn('aceitar', 'Aceitar acordo')}</div>`,
           bind: el => { on(el, 'aceitar', () => actions.responderAcordo(true)); on(el, 'recusar', () => actions.responderAcordo(false)); } };
-        return { key:'acu-espera-resposta', html: waitHtml(`${oppName} está avaliando a sua proposta…`) };
+        return waitP('acu-espera-resposta', `${oppName} avalia a sua proposta`, '');
       }
-      return { key:'acordo-' + a.status, html: waitHtml('O juiz está analisando o acordo…') };
+      return waitP('acordo-' + a.status, 'O juiz analisa o acordo', '');
     }
 
     case 'denuncia': {
       const p = room.pecas || {};
       if(!p.denuncia){
-        if(role === 'acusacao') return { key:'acu-denuncia', html:`
-          <div class="act-title">📜 Ofereça a denúncia</div>
-          <div class="act-hint">Uma boa denúncia tem: <b>quem</b> fez, <b>o que</b> fez, <b>quando e onde</b>, <b>qual crime</b> (artigo da lei) e o <b>pedido</b> de condenação.</div>
-          ${textarea('denuncia', 'O Ministério Público denuncia [nome], porque no dia ... às ..., [o que fez]. A conduta configura o crime do Art. ... do Código Penal, com a qualificadora ... Requer o recebimento da denúncia e a condenação.', 6)}
-          <div class="btn-row">${btn('modelo', '📝 Usar modelo', 'btn-secondary')}${btn('enviar', '📜 Oferecer denúncia')}</div>`,
+        if(role === 'acusacao') return { key:'acu-denuncia', mine:true, title:'Escrever a denúncia', cta:'Escrever', html:`
+          ${sheetHead('Denúncia', 'Diga <b>quem</b> fez, <b>o que</b> fez, <b>quando e onde</b>, <b>qual crime</b> (artigo) e peça a <b>condenação</b>.')}
+          ${textarea('denuncia', 'O Ministério Público denuncia… porque no dia… A conduta configura o crime do Art. … Requer o recebimento da denúncia e a condenação.', 7)}
+          <div class="row">${btn('modelo', 'Usar modelo', 'btn-secondary')}${btn('enviar', 'Denunciar')}</div>`,
           bind: el => {
-            on(el, 'modelo', () => { const ta = el.querySelector('[data-draft="denuncia"]'); if(!ta.value) { ta.value = `O Ministério Público denuncia ${caseOf(room).titulo.replace(/^O |^A /, '')}: no dia dos fatos, o acusado [descreva o que ele fez].\nA conduta se enquadra no ${caseOf(room).arts_rapidos?.[0] || 'Art. ___ do CP'}.\nRequer o recebimento da denúncia, a citação do réu e, ao final, a condenação.`; saveDraft('denuncia', ta.value); autoGrow(ta); } });
+            el.querySelector('[data-act="modelo"]').addEventListener('click', () => {
+              const ta = el.querySelector('[data-draft="denuncia"]');
+              if(!ta.value){ ta.value = `O Ministério Público denuncia o réu porque, no dia dos fatos, [descreva o que ele fez].\nA conduta se enquadra no ${caseOf(room).arts_rapidos?.[0] || 'Art. ___ do Código Penal'}.\nRequer o recebimento da denúncia, a citação do réu e, ao final, a condenação.`; saveDraft('denuncia', ta.value); autoGrow(ta, 260); }
+            });
             on(el, 'enviar', () => actions.enviarPeca('denuncia', val(el, 'denuncia')));
           } };
-        return { key:'def-espera-denuncia', html: waitHtml(`${oppName} está redigindo a denúncia. Aproveite para estudar o caso e o 📖 VADE.`) };
+        return waitP('def-espera-denuncia', `${oppName} escreve a denúncia`, 'Estude o caso e o vade mecum');
       }
       if(!p.resposta){
-        if(role === 'defesa') return { key:'def-resposta', html:`
-          <div class="act-title">🛡️ Apresente a resposta à acusação</div>
-          <div class="act-hint">Leia a denúncia acima. Aponte: <b>provas fracas</b>, <b>nulidades</b> (algo feito errado na investigação), <b>excludentes</b> (legítima defesa, estado de necessidade…) e o que você vai provar.</div>
-          ${textarea('resposta', 'A defesa de [nome] responde à acusação: preliminarmente, ... No mérito, ... Por isso, requer a absolvição.', 6)}
-          <div class="btn-row">${btn('enviar', '🛡️ Apresentar resposta')}</div>`,
+        if(role === 'defesa') return { key:'def-resposta', mine:true, title:'Responder à acusação', cta:'Escrever', html:`
+          ${sheetHead('Resposta à acusação', 'Aponte <b>provas fracas</b>, <b>nulidades</b> (algo feito errado na investigação), <b>excludentes</b> (legítima defesa, estado de necessidade…) e o que você vai provar.')}
+          ${textarea('resposta', 'A defesa responde: preliminarmente… No mérito… Requer a absolvição.', 7)}
+          <div class="row">${btn('enviar', 'Apresentar resposta')}</div>`,
           bind: el => on(el, 'enviar', () => actions.enviarPeca('resposta', val(el, 'resposta'))) };
-        return { key:'acu-espera-resposta', html: waitHtml(`${oppName} está preparando a resposta à acusação…`) };
+        return waitP('acu-espera-resposta', `${oppName} prepara a resposta`, '');
       }
-      return { key:'den-juiz', html: waitHtml('O juiz está analisando as peças…') };
+      return waitP('den-juiz', 'O juiz analisa as peças', '');
     }
 
     case 'instrucao': {
-      const ins = room.instrucao || {};
+      if(!room.instrucao?.limite) return waitP('ins-wait', 'Abrindo a audiência', '');
+      const ins = room.instrucao;
       const d = dossieOf(room);
       const feitas = ins.perguntas?.[role] || 0;
       const lim = ins.limite?.[role] || 0;
       const pronto = ins.pronto?.[role] || feitas >= lim;
       const oppDone = ins.pronto?.[opp] || (ins.perguntas?.[opp] || 0) >= (ins.limite?.[opp] || 0);
-      const silencio = role === 'defesa' ? `<label class="silencio"><input type="checkbox" data-silencio ${ins.silencio ? 'checked' : ''}> 🤐 Orientar o réu a ficar em silêncio diante das perguntas da Acusação</label>` : '';
-      const key = `ins|${feitas}|${lim}|${pronto}|${oppDone}|${ins.silencio}|${JSON.stringify(room.cartas?.[role])}`;
-      if(pronto) return { key, html:`${waitHtml(oppDone ? 'Encerrando a instrução…' : `Você encerrou suas perguntas. ${oppName} ainda está perguntando (pode protestar se quiser).`)}${silencio}`,
-        bind: el => el.querySelector('[data-silencio]')?.addEventListener('change', e => actions.toggleSilencio(e.target.checked)) };
-      return { key, html:`
-        <div class="act-title">🎙️ Inquirição — suas perguntas: <b>${feitas}/${lim}</b></div>
+      const contrLeft = MAX_CONTRADICOES - (ins.contradicoes?.[role] || 0);
+      const ouvidas = [...new Set(autosList(room).filter(a => a.tipo === 'depoimento').map(a => a.testemunhaId))];
+      const silencio = role === 'defesa' ? `<label class="toggle"><input type="checkbox" data-silencio ${ins.silencio ? 'checked' : ''}><span></span>Réu em silêncio diante da Acusação</label>` : '';
+      const contrForm = contrLeft > 0 && ouvidas.length ? `<div class="sub-form contr">
+          <div class="sf-title">Excelência, há uma contradição!</div>
+          <div class="chips">${ouvidas.map(id => { const t = witnessOf(room, id); return `<button type="button" class="chip" data-contr="${id}">${t.emoji} ${escapeHtml(t.nome.split(' ')[0])}</button>`; }).join('')}</div>
+          ${textarea('contradicao', 'O que ela disse e o que a prova mostra? Ex.: "Ele disse que chegou às 2h, mas a mensagem no grupo é das 2h55."', 2)}
+          ${btn('contradicao', `Apontar contradição (+3 / −1) · restam ${contrLeft}`, 'btn-secondary')}</div>` : '';
+      const key = `ins|${feitas}|${lim}|${pronto}|${oppDone}|${ins.silencio}|${contrLeft}|${ouvidas.length}|${JSON.stringify(room.cartas?.[role])}`;
+      if(pronto) return { key, mine:false, title: oppDone ? 'Encerrando a instrução' : `${oppName} ainda está perguntando`, status: 'Você pode protestar contra as perguntas', cta:'Opções',
+        html: silencio || contrForm ? `${sheetHead('Suas perguntas acabaram', 'Você ainda pode apontar contradições ou orientar o silêncio do réu.')}${contrForm}${silencio}` : '',
+        bind: el => { bindContr(el); el.querySelector('[data-silencio]')?.addEventListener('change', e => actions.toggleSilencio(e.target.checked)); } };
+      return { key, mine:true, title:`Perguntar às testemunhas`, status:`${feitas} de ${lim} perguntas`, cta:'Perguntar', html:`
+        ${sheetHead('Quem vai responder?', '')}
         <div class="wit-pick">${d.testemunhas.map(t => {
           const n = autosList(room).filter(a => a.tipo === 'depoimento' && a.testemunhaId === t.id).length;
-          return `<button type="button" class="wit-btn" data-wit="${t.id}"><span class="wit-emoji">${t.emoji}</span><b>${escapeHtml(t.nome)}</b><small>${escapeHtml(t.papel_txt)}${n ? ` · ${n} resp.` : ''}</small></button>`;
+          return `<button type="button" class="wit" data-wit="${t.id}">${avatar(t.emoji)}<b>${escapeHtml(t.nome)}</b><small>${escapeHtml(t.papel_txt)}${n ? ` · ${n}x` : ''}</small></button>`;
         }).join('')}</div>
-        ${textarea('pergunta', 'Escolha a testemunha acima e faça sua pergunta. Dica: perguntas específicas arrancam segredos; perguntas indutivas ("não é verdade que…?") podem levar protesto.', 2)}
-        <div class="btn-row">${btn('perguntar', '🎙️ Perguntar')}${btn('encerrar', 'Encerrar minhas perguntas', 'btn-secondary')}</div>
+        ${textarea('pergunta', 'Sua pergunta. Perguntas específicas arrancam segredos; "não é verdade que…?" pode levar protesto.', 2)}
+        <div class="row">${btn('encerrar', 'Encerrar', 'btn-secondary')}${btn('perguntar', 'Perguntar')}</div>
+        ${contrForm}
         ${silencio}
-        <div class="act-sub">🃏 Suas cartas</div>${cartasHtml(room, ['diligencia', 'pergunta'])}${diligFormHtml()}`,
+        <div class="sf-label">Suas cartas</div>${cartasHtml(room, ['diligencia', 'pergunta'])}${diligFormHtml()}`,
         bind: el => {
           let sel = sessionStorage.getItem('wit_sel') || '';
-          const mark = () => el.querySelectorAll('.wit-btn').forEach(b => b.classList.toggle('sel', b.dataset.wit === sel));
-          el.querySelectorAll('.wit-btn').forEach(b => b.addEventListener('click', () => { sel = b.dataset.wit; sessionStorage.setItem('wit_sel', sel); mark(); el.querySelector('[data-draft="pergunta"]').focus(); }));
+          const mark = () => el.querySelectorAll('.wit').forEach(b => b.classList.toggle('sel', b.dataset.wit === sel));
+          el.querySelectorAll('.wit').forEach(b => b.addEventListener('click', () => { sel = b.dataset.wit; sessionStorage.setItem('wit_sel', sel); mark(); el.querySelector('[data-draft="pergunta"]').focus(); }));
           mark();
           on(el, 'perguntar', () => actions.perguntar(sel, val(el, 'pergunta')));
-          on(el, 'encerrar', () => confirm('Encerrar suas perguntas? Você não poderá perguntar mais nesta audiência.') && actions.encerrarPerguntas());
+          on(el, 'encerrar', async () => confirm('Encerrar suas perguntas? Você não poderá perguntar mais nesta audiência.') && actions.encerrarPerguntas());
           el.querySelector('[data-silencio]')?.addEventListener('change', e => actions.toggleSilencio(e.target.checked));
+          bindContr(el);
           bindCartas(el);
         } };
     }
 
     case 'debates': {
-      const d = room.debates || {};
-      if(d.turno >= TURNOS.length) return { key:'deb-fim', html: waitHtml('Debates encerrados.') };
+      const d = room.debates;
+      if(!d || !TURNOS[d.turno]) return waitP('deb-fim', d ? 'Debates encerrados' : 'Preparando os debates', '');
       const turno = TURNOS[d.turno];
       const deadline = d.inicio + (turno.seg + (d.extra || 0)) * 1000;
       const juri = room.rito === 'juri';
       const key = `deb|${d.turno}|${d.extra}|${JSON.stringify(room.cartas?.[role])}`;
-      if(turno.role !== role) return { key, html:`<div class="act-title">${escapeHtml(turno.titulo)}</div>${waitHtml(`${escapeHtml(nameOf(room, turno.role))} está com a palavra… <b class="clock" data-until="${deadline}"></b>`)}` };
+      const clock = `<b class="clock" data-until="${deadline}"></b>`;
+      if(turno.role !== role) return { ...waitP(key, `${escapeHtml(nameOf(room, turno.role))} está com a palavra`, clock) };
       const primeira = turno.tipo === 'alegacao';
-      return { key, html:`
-        <div class="act-title">🗣️ ${escapeHtml(turno.titulo)} — <b class="clock" data-until="${deadline}"></b></div>
-        <div class="act-hint">${juri ? 'Você fala para os <b>7 jurados</b>: pessoas comuns, que decidem pela emoção e pela clareza. Fale simples, conte uma história, mostre as provas.' : 'Você fala para o juiz: retome as provas e o que as testemunhas disseram, e rebata o adversário.'} Quando o tempo acabar, o que estiver escrito é enviado.</div>
-        ${textarea('alegacao_' + d.turno, primeira ? (juri ? 'Senhores jurados, imaginem a cena… as provas mostram que…' : 'Excelência, as provas mostram que…') : 'Rebata o último argumento do adversário…', 6)}
-        ${primeira ? `<input class="pedido-inp" data-draft="pedido" maxlength="80" placeholder="${role === 'acusacao' ? 'Seu pedido: ex. "condenação a 4 anos, regime semiaberto"' : 'Seu pedido: ex. "absolvição" ou "pena mínima com substituição"'}">` : ''}
-        <div class="btn-row">${btn('enviar', '🗣️ Encerrar minha fala')}${d.turno === 2 ? btn('dispensar', 'Dispensar réplica', 'btn-secondary') : ''}</div>
+      return { key, mine:true, title: turno.titulo.replace(/ da (Acusação|Defesa)/, ''), status: clock, cta:'Falar', autoOpen:true, html:`
+        ${sheetHead(`${escapeHtml(turno.titulo)} · ${clock}`, juri ? 'Você fala para <b>7 jurados</b>: gente comum, que decide pela emoção e pela clareza. Conte uma história, mostre as provas.' : 'Você fala para o juiz: retome as provas e os depoimentos, e rebata o adversário.')}
+        ${textarea('alegacao_' + d.turno, primeira ? (juri ? 'Senhores jurados, imaginem a cena…' : 'Excelência, as provas mostram que…') : 'Rebata o último argumento do adversário…', 7)}
+        ${primeira ? `<input class="field" data-draft="pedido" maxlength="80" placeholder="${role === 'acusacao' ? 'Seu pedido: ex. condenação a 4 anos, semiaberto' : 'Seu pedido: ex. absolvição'}">` : ''}
+        <div class="row">${d.turno === 2 ? btn('dispensar', 'Dispensar réplica', 'btn-secondary') : ''}${btn('enviar', 'Encerrar minha fala')}</div>
+        <div class="sh-foot">Quando o tempo acabar, o que estiver escrito é enviado.</div>
         ${cartasHtml(room, ['tempo'])}`,
         bind: el => {
           on(el, 'enviar', () => actions.enviarAlegacao(val(el, 'alegacao_' + d.turno), primeira ? val(el, 'pedido') : null));
@@ -949,45 +1170,49 @@ function panelFor(room){
     }
 
     case 'julgamento':
-      return { key:'julg', html:`<div class="suspense">${room.rito === 'juri' ? '👥 Os jurados se recolheram à sala secreta para votar…' : '🔨 O juiz se recolheu para redigir a sentença…'}</div>` };
+      return waitP('julg', room.rito === 'juri' ? 'Os jurados estão votando' : 'O juiz redige a sentença', '');
 
     case 'recurso': {
-      const r = room.recurso || {};
+      if(!room.recurso) return waitP('rec-wait', 'Abrindo o prazo de recurso', '');
+      const r = room.recurso;
       const perdedores = r.perdedor === 'ambos' ? ['acusacao', 'defesa'] : [r.perdedor];
       const souPerdedor = perdedores.includes(role);
       if(r.status === 'decidir'){
-        if(souPerdedor && !r.aceitou?.[role]) return { key:'rec-decidir', html:`
-          <div class="act-title">🏛️ ${r.perdedor === 'ambos' ? 'A decisão foi parcial. Quer recorrer?' : 'Você perdeu. Quer apelar ao Tribunal?'}</div>
-          <div class="sentenca-box">${escapeHtml(room.julgamento?.resumo || '')}</div>
-          <div class="act-hint">Três desembargadores vão revisar a decisão: uma garantista, um linha-dura e um técnico. Se ganhar, a decisão muda (e você ganha a conquista "Virada no Tribunal").</div>
-          <div class="btn-row">${btn('apelar', '🏛️ Apelar')}${btn('aceitar', 'Aceitar a decisão', 'btn-secondary')}</div>`,
+        if(souPerdedor && !r.aceitou?.[role]) return { key:'rec-decidir', mine:true, title: r.perdedor === 'ambos' ? 'Decisão parcial: recorrer?' : 'Apelar da sentença?', cta:'Decidir', autoOpen:true, html:`
+          ${sheetHead(r.perdedor === 'ambos' ? 'A decisão foi parcial. Quer recorrer?' : 'Você perdeu. Quer apelar ao Tribunal?', 'Três desembargadores vão revisar: uma garantista, um linha-dura e um técnico.')}
+          <div class="offer">${escapeHtml(room.julgamento?.resumo || '')}</div>
+          <div class="row">${btn('aceitar', 'Aceitar', 'btn-secondary')}${btn('apelar', 'Apelar')}</div>`,
           bind: el => { on(el, 'apelar', () => actions.apelar()); on(el, 'aceitar', () => actions.aceitarDecisao()); } };
-        return { key:'rec-espera', html: waitHtml(souPerdedor ? 'Aguardando o outro lado decidir se recorre…' : `${oppName} está decidindo se apela…`) };
+        return waitP('rec-espera', souPerdedor ? 'Aguardando o outro lado decidir' : `${oppName} decide se apela`, '');
       }
       if(r.status === 'razoes'){
-        if(r.apelante === role) return { key:'rec-razoes', html:`
-          <div class="act-title">🏛️ Razões de apelação</div>
-          <div class="act-hint">Mostre aos desembargadores o que o juiz errou: prova mal avaliada, pena exagerada (ou branda demais), nulidade… Seja objetivo.</div>
-          ${textarea('razoes', 'Egrégio Tribunal, a sentença merece reforma porque…', 6)}
-          <div class="btn-row">${btn('enviar', '📤 Enviar apelação')}</div>`,
+        if(r.apelante === role) return { key:'rec-razoes', mine:true, title:'Escrever a apelação', cta:'Escrever', autoOpen:true, html:`
+          ${sheetHead('Razões de apelação', 'Mostre o que o juiz errou: prova mal avaliada, pena exagerada (ou branda demais), nulidade…')}
+          ${textarea('razoes', 'Egrégio Tribunal, a sentença merece reforma porque…', 7)}
+          <div class="row">${btn('enviar', 'Enviar apelação')}</div>`,
           bind: el => on(el, 'enviar', () => actions.enviarRazoes(val(el, 'razoes'))) };
-        return { key:'rec-espera-razoes', html: waitHtml(`${escapeHtml(nameOf(room, r.apelante))} está escrevendo a apelação…`) };
+        return waitP('rec-espera-razoes', `${escapeHtml(nameOf(room, r.apelante))} escreve a apelação`, '');
       }
       if(r.status === 'contrarrazoes'){
-        if(r.apelante !== role) return { key:'rec-contra', html:`
-          <div class="act-title">🛡️ Contrarrazões</div>
-          <div class="act-hint">O adversário recorreu. Defenda a sentença: mostre por que o juiz acertou.</div>
-          ${textarea('contrarrazoes', 'A sentença deve ser mantida porque…', 5)}
-          <div class="btn-row">${btn('enviar', '📤 Enviar contrarrazões')}${btn('dispensar', 'Não apresentar', 'btn-secondary')}</div>`,
+        if(r.apelante !== role) return { key:'rec-contra', mine:true, title:'Responder ao recurso', cta:'Escrever', autoOpen:true, html:`
+          ${sheetHead('Contrarrazões', 'O adversário recorreu. Mostre por que o juiz acertou.')}
+          ${textarea('contrarrazoes', 'A sentença deve ser mantida porque…', 6)}
+          <div class="row">${btn('dispensar', 'Não apresentar', 'btn-secondary')}${btn('enviar', 'Enviar')}</div>`,
           bind: el => { on(el, 'enviar', () => actions.enviarContrarrazoes(val(el, 'contrarrazoes'))); on(el, 'dispensar', () => actions.enviarContrarrazoes('', true)); } };
-        return { key:'rec-espera-contra', html: waitHtml(`${oppName} está respondendo ao seu recurso…`) };
+        return waitP('rec-espera-contra', `${oppName} responde ao seu recurso`, '');
       }
-      return { key:'rec-julgando', html:`<div class="suspense">🏛️ A 1ª Câmara Criminal está reunida…</div>` };
+      return waitP('rec-julgando', 'A Câmara Criminal está reunida', '');
     }
 
     case 'fim': return finalPanel(room);
   }
-  return { key:'?', html:'' };
+  return waitP('?', '', '');
+}
+
+function bindContr(el){
+  let sel = '';
+  el.querySelectorAll('[data-contr]').forEach(b => b.addEventListener('click', () => { sel = b.dataset.contr; el.querySelectorAll('[data-contr]').forEach(x => x.classList.toggle('sel', x === b)); }));
+  on(el, 'contradicao', () => actions.apontarContradicao(sel, val(el, 'contradicao')));
 }
 
 let careerSaved = false;
@@ -997,27 +1222,29 @@ function finalPanel(room){
   const res = computeResult(room, role);
   const vencedor = room.final?.vencedor;
   const placarWin = s.acusacao === s.defesa ? null : (s.acusacao > s.defesa ? 'acusacao' : 'defesa');
-  const titulo = placarWin === role ? '🏆 VOCÊ VENCEU!' : placarWin ? `${ROLE_ICON[placarWin]} ${escapeHtml(nameOf(room, placarWin))} venceu` : '🤝 EMPATE';
-  const nextIdx = (room.caseIdx + 1) % G.cases.length || 1;
-  return { key:'fim', html:`
-    <div class="final-card">
-      <div class="final-title">${titulo}</div>
-      <div class="final-score"><div class="fs acusacao"><small>${escapeHtml(nameOf(room, 'acusacao'))}</small><b>${s.acusacao || 0}</b><span>⚔️ Acusação</span></div><div class="fs-x">×</div><div class="fs defesa"><small>${escapeHtml(nameOf(room, 'defesa'))}</small><b>${s.defesa || 0}</b><span>🛡️ Defesa</span></div></div>
-      <div class="final-proc">⚖️ <b>Resultado do processo:</b> ${escapeHtml(room.final?.texto || '')} ${room.final?.bonus ? `<br>A causa foi ganha pela <b>${ROLE_LABEL[vencedor]}</b> (+5 pontos).` : vencedor === 'empate' ? '<br>Resultado dividido: ninguém levou a causa por inteiro.' : ''}</div>
-      <div class="act-sub">Suas conquistas</div>
-      <div class="ach-row">${res.conquistas.length ? res.conquistas.map(c => `<div class="ach"><span>${c.emoji}</span><b>${c.nome}</b><small>${c.desc}</small></div>`).join('') : '<div class="act-hint">Nenhuma desta vez. Na próxima!</div>'}</div>
-      <div class="xp-gain">+${res.xp} XP</div>
+  const titulo = placarWin === role ? 'Você venceu!' : placarWin ? `${escapeHtml(nameOf(room, placarWin))} venceu` : 'Empate';
+  return { key:'fim', mine:true, title: titulo, cta:'Resultado', autoOpen:true, html:`
+    <div class="final">
+      <div class="f-kicker">${escapeHtml(room.caseData?.nome || '')}</div>
+      <div class="f-title ${placarWin === role ? 'win' : ''}">${titulo}</div>
+      <div class="f-score"><div class="fs acusacao"><b>${s.acusacao || 0}</b><small>${escapeHtml(nameOf(room, 'acusacao'))}</small><span>Acusação</span></div><div class="fs defesa"><b>${s.defesa || 0}</b><small>${escapeHtml(nameOf(room, 'defesa'))}</small><span>Defesa</span></div></div>
+      <div class="f-proc">${escapeHtml(room.final?.texto || '')}${room.final?.bonus ? ` <b>A causa foi ganha pela ${ROLE_LABEL[vencedor]} (+5).</b>` : vencedor === 'empate' ? ' <b>Resultado dividido.</b>' : ''}</div>
+      ${res.conquistas.length ? `<div class="sf-label">Conquistas</div><div class="achs">${res.conquistas.map(c => `<div class="ach"><span>${c.emoji}</span><b>${c.nome}</b><small>${c.desc}</small></div>`).join('')}</div>` : ''}
+      <div class="xp">+${res.xp} XP</div>
       <div id="final-career"></div>
-      <div class="act-sub">Próxima rodada (os papéis se invertem)</div>
-      <select class="case-select" data-next>${G.cases.map((c, i) => `<option value="${i}" ${i === nextIdx ? 'selected' : ''}>${c.id} · ${escapeHtml(c.nome)}</option>`).join('')}</select>
-      <div class="btn-row">${btn('novo', '▶ Próximo caso')}</div>
+      <div class="row">${btn('novo', 'Sortear próximo caso')}</div>
+      <div class="sh-foot">No próximo caso, vocês trocam de papel.</div>
     </div>`,
     bind: el => {
       playSound(placarWin === role ? 'win' : 'gavel');
-      on(el, 'novo', () => confirm('Começar o próximo caso? Vocês trocam de papel.') && actions.novoCaso(Number(el.querySelector('[data-next]').value)));
-      if(!careerSaved && !isAI(room, role)){
+      on(el, 'novo', async () => { if(confirm('Sortear o próximo caso? Vocês trocam de papel.')) await actions.novoCaso(); return false; });
+      if(!careerSaved && G.me.name){
         careerSaved = true;
-        saveCareer(G.db, G.me.name, { ...room, code: G.code }, role, res).then(c => { if(c) $('final-career').innerHTML = careerCardHtml(c); }).catch(e => console.warn('carreira', e));
+        // se a carreira já foi somada (ex.: recarregou a página no fim), só mostra a atual
+        saveCareer(G.db, G.me.name, { ...room, code: G.code }, role, res)
+          .then(c => c || G.db.ref(`career/${slug(G.me.name)}`).once('value').then(s => s.val()))
+          .then(c => { if(c && $('final-career')) $('final-career').innerHTML = careerCardHtml(c); })
+          .catch(e => console.warn('carreira', e));
       }
     } };
 }
@@ -1040,10 +1267,9 @@ export function assistContext(){
   const room = G.room;
   const d = dossieOf(room);
   const nivel = nivelOf(room, me());
-  const usados = room.assistUses?.[me()] || 0;
   return {
     extra: { ...aiContext(room), fase: FASES[room.phase]?.nome, nivel, segredos: me() === 'acusacao' ? d.segredo_acu : d.segredo_def },
-    limite: ASSIST_LIMITE[nivel], usados,
+    limite: ASSIST_LIMITE[nivel], usados: room.assistUses?.[me()] || 0,
     caseObj: caseOf(room)
   };
 }

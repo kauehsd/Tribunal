@@ -294,6 +294,99 @@ export const DOSSIES = {
   }
 };
 
+// ── Inconsistências e 2ª reviravolta ──────────────────────────────────────
+// contradicoes: um detalhe em que cada depoente ERRA e sustenta, conflitando com as provas.
+//   Quem perceber pode "Apontar contradição" na audiência.
+// reviravolta2: chega antes dos debates e favorece o lado oposto da primeira.
+const EXTRAS = {
+  '00': {
+    reviravolta2: { titulo: 'O áudio das 3h10', texto: 'Carla junta ao processo um áudio que Bruno mandou para um amigo às 3h10: "comi a da Carla de propósito, ela merece kkk".' },
+    contradicoes: {
+      carla: 'Ela afirma que a pizza custou R$90 — mas a nota da pizzaria mostra R$72.',
+      tiago: 'Ele diz que dormiu às 23h e não saiu de casa — mas a câmera do corredor o mostra às 3h05 com um prato.',
+      bruno: 'Ele diz que chegou da festa às 2h — mas mandou "chegando" no grupo às 2h55.'
+    }
+  },
+  '01': {
+    reviravolta2: { titulo: 'A pesquisa no celular', texto: 'A perícia no celular de Marcos encontra uma busca feita à 1h40, meia hora antes do furto: "como abrir fechadura sem chave".' },
+    contradicoes: {
+      joaquim: 'Ele diz que o alarme tocou às 2h05 — mas a câmera registra o arrombamento às 2h14.',
+      sd_lima: 'Ele diz que Marcos estava "tranquilo, sem chorar" — mas o próprio boletim registra receio e choro.',
+      dona_cida: 'Ela diz que Marcos bateu na porta "por volta da meia-noite" — mas a declaração escrita dela fala em 2h.',
+      marcos: 'Ele diz que pegou "só fralda e remédio" — mas a nota inclui biscoito e o policial viu chocolate.'
+    }
+  },
+  '02': {
+    reviravolta2: { titulo: 'A faca nova', texto: 'A irmã de Renata entrega um recibo: no dia anterior, Renata comprou uma faca de 20cm numa loja de utilidades. A faca da cozinha continua intacta na casa dela.' },
+    contradicoes: {
+      sonia: 'Ela diz que o filho "nunca bebia" — mas o vizinho o viu chegar alcoolizado às 22h.',
+      helio: 'Ele diz que a briga durou "uns 5 minutos" — mas a câmera mostra Renata 23 minutos dentro do prédio.',
+      dra_luiza: 'Ela diz que avaliou Renata "em várias sessões" — mas o laudo registra uma única sessão.',
+      renata: 'Ela diz que Diego a agarrou "logo que ela entrou" — mas os vizinhos só ouviram gritos 15 minutos depois.'
+    }
+  },
+  '03': {
+    reviravolta2: { titulo: 'A segunda vítima', texto: 'Uma mulher de Goiânia reconhece Felipe por foto: mesmo perfil "Dr. Rafael", mesmo roteiro de mensagens, R$31.000 perdidos.' },
+    contradicoes: {
+      joana: 'Ela diz que nunca desconfiou — mas escreveu à filha no mês 3: "acho que ele é golpista".',
+      delegado: 'Ele diz que chegou aos comparsas "pela quebra de sigilo autorizada" — mas as datas do ofício do banco são anteriores à autorização.',
+      kelly: 'Ela diz que só emprestava a conta — mas o celular dela tem conversas diretas com Joana.',
+      felipe: 'Ele diz que nunca mentiu a profissão — mas o perfil dizia "cardiologista, CRM ativo".'
+    }
+  },
+  '04': {
+    reviravolta2: { titulo: 'O exame de Lucas', texto: 'O exame toxicológico feito em Lucas na entrada da delegacia aponta alta concentração de cocaína — compatível com agitação e agressividade.' },
+    contradicoes: {
+      lucas: 'Ele diz que nunca encostou no policial — mas o arranhão no rosto de Ronaldo é compatível com luta corporal.',
+      detento: 'Ele diz que viu tudo "desde o começo" — mas a câmera mostra que ele estava deitado de costas no início.',
+      sgt_ana: 'Ela diz que estava no balcão e "não viu nada" — mas o computador dela estava com a câmera da cela aberta na tela.',
+      ronaldo: 'Ele diz que Lucas tentou fugir da cela — mas a cela estava trancada e Lucas algemado.'
+    }
+  },
+  '05': {
+    reviravolta2: { titulo: 'O dinheiro em Portugal', texto: 'O COAF informa: uma semana antes de ser intimado, Marcelo transferiu R$90.000 para uma conta em Lisboa, em nome de uma empresa recém-aberta.' },
+    contradicoes: {
+      auditora: 'Ela diz que nenhuma das 14 empresas tinha atividade — mas duas tinham funcionários registrados.',
+      irmao: 'Ele diz que nunca recebeu dinheiro do irmão — mas há um PIX de R$5.000 de Marcelo para ele.',
+      gestor: 'Ele diz que nunca foi alertado — mas o e-mail do auditor de dez/2022 foi enviado a ele.',
+      marcelo: 'Ele diz que os serviços foram prestados por "terceirizados de TI" — mas nenhuma das 312 notas descreve serviço algum.'
+    }
+  },
+  '06': {
+    reviravolta2: { titulo: 'O freio com defeito', texto: 'A concessionária informa que, dois dias antes do acidente, o carro de Bruno acusou falha no sistema de freios ABS — e o reparo foi agendado para a semana seguinte.' },
+    contradicoes: {
+      fabio: 'Ele diz que parou antes do cruzamento — mas a câmera mostra o carro dele 30m atrás do de Bruno no momento do impacto.',
+      marta: 'Ela diz que o sinal estava "verde para o pedestre" — mas o semáforo estava piscando amarelo.',
+      perito_transito: 'Ele calcula 127km/h — mas o radar fixo 300m antes registrou 118km/h.',
+      bruno_r: 'Ele diz que bebeu "quase nada" — mas o bafômetro deu 1,8g/L.'
+    }
+  },
+  '07': {
+    reviravolta2: { titulo: 'Onde estava Caio?', texto: 'A perícia digital mostra que o story foi publicado pelo Wi-Fi da agência que gerencia Caio. Naquela hora, segundo o check-in de um hotel, Caio estava em outra cidade.' },
+    contradicoes: {
+      patricia: 'Ela diz que nunca tinha falado com Caio — mas há mensagens dela respondendo a ele 3 semanas antes.',
+      social_media: 'Ela diz que Caio publica "sempre sozinho" — mas ela tinha a senha da conta.',
+      amigo_caio: 'Ele diz que não compartilhou o post — mas existe o repost dele com "kkkkk mito".',
+      caio: 'Ele diz que apagou "assim que viu a repercussão" — mas só apagou 14 horas depois.'
+    }
+  },
+  '08': {
+    reviravolta2: { titulo: 'A diarista', texto: 'Descobre-se que a diarista, que ia duas vezes por semana, também preparava o chá de Osvaldo — e foi demitida por ele uma semana antes da internação, depois de uma briga feia.' },
+    contradicoes: {
+      osvaldo: 'Ele diz que "nunca" preparou o próprio chá — mas a vizinha o viu fazendo chá no quintal.',
+      vizinha: 'Ela diz que viu o frasco no lixo "na véspera da internação" — mas a coleta do reciclável tinha passado dois dias antes.',
+      toxicologista: 'Ele diz que a exposição durou "três semanas" — mas o próprio laudo indica pelo menos seis.',
+      eduardo: 'Ele diz que nunca entrou em site de produtos químicos — mas a compra foi feita a partir do e-mail dele.'
+    }
+  }
+};
+
+for (const [id, x] of Object.entries(EXTRAS)) {
+  const d = DOSSIES[id];
+  d.reviravoltas = [d.reviravolta, x.reviravolta2];
+  d.testemunhas.forEach(t => { t.contradicao = x.contradicoes[t.id] || ''; });
+}
+
 // Jurados possíveis (7 são sorteados por julgamento)
 export const JURADOS = [
   { nome: 'Dona Cleusa', perfil: 'professora aposentada, 67 anos, religiosa, muito sensível a histórias de família e maternidade', emoji: '👩‍🏫' },

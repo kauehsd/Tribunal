@@ -44,6 +44,19 @@ const LOCAL = {
     };
   },
 
+  contradicao: (c, x) => {
+    const q = words(x.alegacao);
+    const procede = [...words(x.testemunha?.contradicao)].filter(w => q.has(w)).length >= 2;
+    return {
+      procede,
+      text: procede ? 'Procede. O depoimento conflita com o que está documentado nos autos.' : 'Não vislumbro contradição relevante no que foi apontado.',
+      em_resumo: procede ? 'O juiz concordou: a testemunha se contradisse.' : 'O juiz não viu contradição nesse ponto.'
+    };
+  },
+
+  // sem IA não dá para inventar um caso: quem chamou escolhe um caso pronto
+  gerar_caso: () => ({ text: 'ok', caso: null }),
+
   diligencia: (c, x) => {
     const idx = (x.fatos_ocultos || []).length ? 0 : -1;
     return {

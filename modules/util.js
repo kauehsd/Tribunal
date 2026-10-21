@@ -58,6 +58,7 @@ export function playSound(type){
       twist:{ f:[[330,0],[415,0.15],[523,0.3],[659,0.45]], vol:0.14, dur:0.7, wave:'triangle' },
       protest:{ f:[[740,0],[370,0.12]], vol:0.18, dur:0.3, wave:'sawtooth' },
       tick:{ f:[[1200,0]], vol:0.07, dur:0.08 },
+      turn:{ f:[[660,0],[880,0.09]], vol:0.12, dur:0.25, wave:'triangle' },
       win:{ f:[[523,0],[659,0.15],[784,0.3],[1046,0.45]], vol:0.16, dur:0.9, wave:'triangle' }
     }[type];
     if(!tones) return;
@@ -70,6 +71,13 @@ export function playSound(type){
     gain.gain.exponentialRampToValueAtTime(0.001, t + tones.dur);
     osc.start(t); osc.stop(t + tones.dur);
   }catch(e){ /* sem áudio, sem problema */ }
+}
+
+// Vibração do celular (Android; no iPhone o navegador ignora sem erro)
+export function vibrate(pattern){
+  // o navegador só deixa vibrar depois que a pessoa tocou na tela pelo menos uma vez
+  if(navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+  try{ navigator.vibrate?.(pattern); }catch(e){}
 }
 
 // Popover do glossário: toque/clique num termo sublinhado
