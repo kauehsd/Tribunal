@@ -23,7 +23,7 @@ const PROVIDERS = [
     name: 'groq',
     env: 'GROQ_KEY',
     url: 'https://api.groq.com/openai/v1/chat/completions',
-    model: () => process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    model: () => process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
     jsonMode: true
   },
   {
@@ -68,13 +68,17 @@ async function callProvider(provider, prompt, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const model = provider.model();
     const body = {
-      model: provider.model(),
+      model,
       messages: prompt.messages,
       max_tokens: prompt.maxTokens,
       temperature: prompt.temperature ?? 0.7
     };
     if (prompt.json && provider.jsonMode) body.response_format = { type: 'json_object' };
+    // Modelos que "pensam" antes de responder gastam tokens nisso: pensamento curto e margem extra
+    if (/gpt-oss/.test(model)) { body.reasoning_effort = 'low'; body.max_tokens += 800; }
+    if (provider.name === 'openrouter') { body.max_tokens += 800; body.reasoning = { effort: 'low' }; }
 
     const r = await fetch(provider.url, {
       method: 'POST',
@@ -138,7 +142,7 @@ async function diagnose() {
     if (!process.env[p.env]) { results[p.name] = 'sem chave'; continue; }
     const t0 = Date.now();
     try {
-      await callProvider(p, { messages: [{ role: 'user', content: 'Responda apenas: ok' }], maxTokens: 20, json: false }, 15000);
+      await callProvider(p, { messages: [{ role: 'user', content: 'Responda apenas: ok' }], maxTokens: 60, json: false }, 15000);
       results[p.name] = `ok (${Date.now() - t0}ms, modelo ${p.model()})`;
     } catch (e) {
       results[p.name] = e.name === 'AbortError' ? 'demorou demais' : `erro: ${e.message} (modelo ${p.model()})`;
