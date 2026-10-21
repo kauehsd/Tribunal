@@ -35,6 +35,13 @@ http.createServer(async (req, res) => {
   if (url.pathname === '/api/judge') {
     let raw = '';
     for await (const chunk of req) raw += chunk;
+    // JUDGE_PROXY=https://seu-site.vercel.app → usa a IA (e as chaves) do site publicado
+    if (process.env.JUDGE_PROXY) {
+      const r = await fetch(process.env.JUDGE_PROXY + req.url, { method: req.method, headers: { 'Content-Type': 'application/json' }, body: req.method === 'POST' ? raw : undefined }).catch(e => ({ status: 502, text: async () => JSON.stringify({ error: e.message }) }));
+      res.statusCode = r.status;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      return res.end(await r.text());
+    }
     try { req.body = raw ? JSON.parse(raw) : {}; } catch { req.body = {}; }
     return judge(req, wrapRes(res));
   }
@@ -47,5 +54,6 @@ http.createServer(async (req, res) => {
 }).listen(PORT, () => {
   const configured = ['GROQ_KEY', 'GEMINI_KEY', 'CEREBRAS_KEY', 'OPENROUTER_KEY'].filter(k => process.env[k]);
   console.log(`Tribunal do Casal em http://localhost:${PORT}`);
-  console.log(configured.length ? `IAs configuradas: ${configured.join(', ')}` : 'Nenhuma chave de IA em .env.local — o juiz local (offline) será usado.');
+  if (process.env.JUDGE_PROXY) console.log(`IA: usando ${process.env.JUDGE_PROXY}/api/judge`);
+  else console.log(configured.length ? `IAs configuradas: ${configured.join(', ')}` : 'Nenhuma chave de IA em .env.local — o juiz local (offline) será usado.');
 });

@@ -1,9 +1,9 @@
-// api/judge.js — Vercel Serverless Function do Juiz IA
+// api/judge.js — Vercel Serverless Function: todos os personagens de IA do tribunal
 //
 // Todas as IAs aqui têm plano gratuito. O servidor tenta uma de cada vez, na
 // ordem de PROVIDERS; se uma falhar (sem chave, limite atingido, fora do ar,
 // demorou demais), passa para a próxima. Se todas falharem, responde 503 e o
-// frontend usa o juiz local (judge_local.js).
+// frontend usa o motor local (ai-bridge.js / judge_local.js).
 //
 // Variáveis de ambiente (Vercel → Settings → Environment Variables):
 //   GROQ_KEY        https://console.groq.com/keys
@@ -12,8 +12,11 @@
 //   OPENROUTER_KEY  https://openrouter.ai/settings/keys
 // Opcional: GROQ_MODEL, GEMINI_MODEL, CEREBRAS_MODEL, OPENROUTER_MODEL para trocar o modelo.
 //
-// POST /api/judge  { mode: 'judge' | 'verdict' | 'assist', caseObj, messages, extra }
-// GET  /api/judge  → diz quais IAs estão configuradas (sem mostrar as chaves)
+// POST /api/judge        { mode, caseObj, messages, extra }  (modos em MODES, abaixo)
+// GET  /api/judge        → quais IAs estão configuradas (sem mostrar as chaves)
+// GET  /api/judge?diag=1 → testa cada IA de verdade e diz qual funciona
+
+import { MODES, PERSONA_JUIZ } from './_prompts.js';
 
 const PROVIDERS = [
   {
@@ -46,97 +49,17 @@ const PROVIDERS = [
   }
 ];
 
-const PROVIDER_TIMEOUT_MS = 15000;
-const TOTAL_BUDGET_MS = 45000;
+const PROVIDER_TIMEOUT_MS = 20000;
+const TOTAL_BUDGET_MS = 52000;
 const COOLDOWN_MS = 60000;
 
 // Quando uma IA responde "limite atingido" (429), pulamos ela por 1 minuto.
 // Fica só na memória da instância — é um atalho, não uma garantia.
 const cooldownUntil = {};
 
-// ─── Montagem do contexto ──────────────────────────────────────────────────
-
 function clip(value, max) {
   const s = String(value ?? '');
   return s.length > max ? s.slice(0, max) + '…' : s;
-}
-
-function stripHtml(s) {
-  return String(s || '').replace(/<[^>]+>/g, '');
-}
-
-function describeCase(caseObj = {}) {
-  const parts = [`CASO: ${clip(caseObj.titulo || 'Caso sem título', 120)}`];
-  if (caseObj.corpo) parts.push(clip(stripHtml(caseObj.corpo), 1500));
-  if (caseObj.context_juiz) parts.push(clip(caseObj.context_juiz, 1500));
-  if (caseObj.antecedentes_criminais) parts.push(`Antecedentes: ${clip(caseObj.antecedentes_criminais, 400)}`);
-  if (caseObj.contexto_social) parts.push(`Contexto social: ${clip(caseObj.contexto_social, 400)}`);
-  if (Array.isArray(caseObj.provas) && caseObj.provas.length) {
-    parts.push('PROVAS:\n' + caseObj.provas.slice(0, 12).map(p => `- ${clip(p, 300)}`).join('\n'));
-  }
-  if (caseObj.penaMin != null && caseObj.penaMax != null) {
-    parts.push(`Faixa de pena de referência: ${caseObj.penaMin} a ${caseObj.penaMax} anos.`);
-  }
-  return parts.join('\n\n');
-}
-
-function describeDebate(messages) {
-  const lines = (Array.isArray(messages) ? messages : [])
-    .slice(-40)
-    .map(m => {
-      const who = m.role === 'acusacao' ? 'ACUSAÇÃO' : m.role === 'defesa' ? 'DEFESA' : 'JUIZ';
-      return `[${who}] ${clip(m.sender || '', 30)}: ${clip(m.text || '', 800)}`;
-    });
-  return lines.join('\n') || '(nenhum argumento ainda)';
-}
-
-const PERSONA = 'Você é o Dr. Augusto Melo, juiz criminal brasileiro experiente, firme e justo, com um toque de humor seco. Você preside um jogo de debate jurídico entre dois jogadores (Acusação e Defesa). Escreva sempre em português do Brasil.';
-
-function buildPrompt(mode, caseObj, messages, extra = {}) {
-  const caso = describeCase(caseObj);
-  const debate = describeDebate(messages);
-
-  if (mode === 'assist') {
-    const papel = extra.role === 'defesa' ? 'Defesa' : 'Acusação';
-    const history = (Array.isArray(extra.history) ? extra.history : []).slice(-8)
-      .map(h => ({ role: h.type === 'ai' ? 'assistant' : 'user', content: clip(h.text, 1200) }));
-    return {
-      json: false,
-      maxTokens: 600,
-      messages: [
-        { role: 'system', content: `Você é um assistente jurídico estratégico e PRIVADO do jogador que joga como ${papel} num jogo de debate penal. Ajude o jogador a PENSAR: aponte artigos, jurisprudência, fraquezas do adversário e perguntas para refletir, mas não escreva o argumento pronto. Seja direto e didático, no máximo 3 parágrafos curtos. Português do Brasil.\n\n${caso}\n\nDEBATE ATÉ AGORA:\n${debate}` },
-        ...history,
-        { role: 'user', content: clip(extra.question || '', 1500) }
-      ]
-    };
-  }
-
-  if (mode === 'verdict') {
-    const pedidos = extra.pedidos || {};
-    const recursos = extra.recursos || {};
-    const final = Boolean(recursos.acu || recursos.def);
-    const recursoTxt = final
-      ? `\n\nRECURSO DA ACUSAÇÃO: ${clip(recursos.acu || 'não apresentado', 1200)}\nRECURSO DA DEFESA: ${clip(recursos.def || 'não apresentado', 1200)}`
-      : '';
-    return {
-      json: true,
-      maxTokens: 900,
-      messages: [
-        { role: 'system', content: PERSONA },
-        { role: 'user', content: `${caso}\n\nDEBATE:\n${debate}\n\nPEDIDOS — Acusação: ${clip(pedidos.acu || 'não informado', 120)} / Defesa: ${clip(pedidos.def || 'não informado', 120)}${recursoTxt}\n\nDê o ${final ? 'VEREDITO FINAL (após os recursos)' : 'VEREDITO'}. Julgue pela qualidade dos argumentos apresentados pelos jogadores, não só pelos fatos do caso. Responda APENAS com um JSON válido neste formato:\n{"decisao": "CONDENAÇÃO" | "ABSOLVIÇÃO" | "CONDENAÇÃO PARCIAL", "fundamentacao": "3 a 5 frases citando os melhores argumentos de cada lado", "pena": "pena e regime, ou 'não se aplica'", "placar": {"acusacao": 0-10, "defesa": 0-10}, "destaque": "uma frase curta e marcante para encerrar a sessão"}` }
-      ]
-    };
-  }
-
-  // mode === 'judge' — intervenção durante o debate
-  return {
-    json: true,
-    maxTokens: 600,
-    messages: [
-      { role: 'system', content: PERSONA },
-      { role: 'user', content: `${caso}\n\nDEBATE:\n${debate}\n\nIntervenha no debate. Comente brevemente o ponto mais forte e o mais fraco que você viu, e faça UMA pergunta curta e afiada para cada lado. Dê também uma nota parcial de 0 a 10 para cada lado, pela qualidade dos argumentos até agora (0 se o lado ainda não argumentou). Responda APENAS com um JSON válido neste formato:\n{"fala": "sua fala ao tribunal, no máximo 4 frases", "pergunta_acusacao": "...", "pergunta_defesa": "...", "placar": {"acusacao": 0-10, "defesa": 0-10}}` }
-    ]
-  };
 }
 
 // ─── Chamada às IAs ────────────────────────────────────────────────────────
@@ -149,7 +72,7 @@ async function callProvider(provider, prompt, timeoutMs) {
       model: provider.model(),
       messages: prompt.messages,
       max_tokens: prompt.maxTokens,
-      temperature: 0.7
+      temperature: prompt.temperature ?? 0.7
     };
     if (prompt.json && provider.jsonMode) body.response_format = { type: 'json_object' };
 
@@ -177,7 +100,8 @@ export function configuredProviders() {
   return PROVIDERS.filter(p => process.env[p.env]);
 }
 
-export async function askAnyProvider(prompt) {
+// Tenta as IAs em ordem. Se a resposta precisa ser JSON e veio quebrada, tenta a próxima.
+export async function askAnyProvider(prompt, validate = () => true) {
   const started = Date.now();
   const errors = [];
   for (const provider of configuredProviders()) {
@@ -186,6 +110,7 @@ export async function askAnyProvider(prompt) {
     if (remaining < 3000) break;
     try {
       const text = await callProvider(provider, prompt, Math.min(PROVIDER_TIMEOUT_MS, remaining));
+      if (!validate(text)) throw new Error(`${provider.name} respondeu fora do formato`);
       return { text, provider: provider.name };
     } catch (e) {
       const reason = e.name === 'AbortError' ? `${provider.name} demorou demais` : e.message;
@@ -198,8 +123,6 @@ export async function askAnyProvider(prompt) {
   throw err;
 }
 
-// ─── Interpretação das respostas ───────────────────────────────────────────
-
 // Os modelos às vezes embrulham o JSON em ```json ... ``` ou texto extra.
 export function parseLooseJson(text) {
   const cleaned = String(text || '').replace(/```(?:json)?/gi, '');
@@ -209,39 +132,19 @@ export function parseLooseJson(text) {
   try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { return null; }
 }
 
-function clampScore(v) {
-  const n = Math.round(Number(v));
-  return Number.isFinite(n) ? Math.max(0, Math.min(10, n)) : null;
-}
-
-function readScore(placar) {
-  if (!placar) return null;
-  const acusacao = clampScore(placar.acusacao);
-  const defesa = clampScore(placar.defesa);
-  return acusacao == null || defesa == null ? null : { acusacao, defesa };
-}
-
-export function shapeResponse(mode, raw, provider) {
-  if (mode === 'assist') return { text: raw, provider };
-
-  const data = parseLooseJson(raw);
-  if (!data) return { text: raw, provider, placar: null, perguntas_acu: [], perguntas_def: [] };
-
-  if (mode === 'verdict') {
-    const decisao = String(data.decisao || '').toUpperCase() || 'DECISÃO';
-    const lines = [decisao, '', data.fundamentacao || ''];
-    if (data.pena) lines.push('', `Pena: ${data.pena}`);
-    if (data.destaque) lines.push('', `“${data.destaque}”`);
-    return { text: lines.join('\n').trim(), decisao, pena: data.pena || '', placar: readScore(data.placar), provider };
+async function diagnose() {
+  const results = {};
+  for (const p of PROVIDERS) {
+    if (!process.env[p.env]) { results[p.name] = 'sem chave'; continue; }
+    const t0 = Date.now();
+    try {
+      await callProvider(p, { messages: [{ role: 'user', content: 'Responda apenas: ok' }], maxTokens: 20, json: false }, 15000);
+      results[p.name] = `ok (${Date.now() - t0}ms, modelo ${p.model()})`;
+    } catch (e) {
+      results[p.name] = e.name === 'AbortError' ? 'demorou demais' : `erro: ${e.message} (modelo ${p.model()})`;
+    }
   }
-
-  return {
-    text: data.fala || raw,
-    perguntas_acu: data.pergunta_acusacao ? [String(data.pergunta_acusacao)] : [],
-    perguntas_def: data.pergunta_defesa ? [String(data.pergunta_defesa)] : [],
-    placar: readScore(data.placar),
-    provider
-  };
+  return results;
 }
 
 // ─── Handler ───────────────────────────────────────────────────────────────
@@ -253,20 +156,27 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
   if (req.method === 'GET') {
+    const wantsDiag = String(req.url || '').includes('diag=1') || req.query?.diag === '1';
+    if (wantsDiag) return res.status(200).json({ ok: true, diagnostico: await diagnose() });
     const status = Object.fromEntries(PROVIDERS.map(p => [p.name, Boolean(process.env[p.env])]));
-    return res.status(200).json({ ok: true, providers: status });
+    return res.status(200).json({ ok: true, providers: status, modos: Object.keys(MODES) });
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'method_not_allowed' });
 
   const body = typeof req.body === 'string' ? (parseLooseJson(req.body) || {}) : (req.body || {});
-  const mode = ['judge', 'verdict', 'assist'].includes(body.mode) ? body.mode : 'judge';
+  const mode = MODES[body.mode] ? body.mode : 'judge';
   if (!configuredProviders().length) return res.status(503).json({ error: 'no_providers_configured' });
 
+  const spec = MODES[mode];
   try {
-    const prompt = buildPrompt(mode, body.caseObj || {}, body.messages || [], body.extra || {});
-    const { text, provider } = await askAnyProvider(prompt);
-    return res.status(200).json(shapeResponse(mode, text, provider));
+    const prompt = spec.build(body.caseObj || {}, body.messages || [], body.extra || {});
+    const validate = prompt.json ? (t => Boolean(parseLooseJson(t))) : undefined;
+    const { text, provider } = await askAnyProvider(prompt, validate);
+    const data = prompt.json ? parseLooseJson(text) : text;
+    return res.status(200).json({ ...spec.shape(data, body.extra || {}), provider });
   } catch (e) {
     return res.status(503).json({ error: 'all_providers_failed', details: e.details || [e.message] });
   }
 }
+
+export { PERSONA_JUIZ };
