@@ -115,12 +115,15 @@ export const MODES = {
   // "Protesto, Excelência!" — o juiz decide se a pergunta pode ser feita
   protesto: {
     build: (c, m, extra) => judgePrompt(c, extra,
-      `FASE: audiência de instrução. Durante a inquirição de ${clip(extra.testemunha_nome, 80)}, ${extra.por === 'acusacao' ? 'a Acusação' : 'a Defesa'} fez a pergunta:\n"${clip(extra.pergunta, 600)}"\n${extra.contra === 'acusacao' ? 'A Acusação' : 'A Defesa'} protestou. Motivo alegado: ${clip(extra.motivo, 120)}.\nDecida como juiz (Art. 212 CPP: o juiz não admite perguntas que induzam a resposta, não tenham relação com a causa ou importem repetição de outra já respondida; também não se admite pergunta ofensiva ou que peça especulação/opinião da testemunha). Seja justo: protesto sem fundamento deve ser indeferido.\nFormato:\n{"decisao": "deferido" | "indeferido", "fundamento": "1 frase curta e firme, como dita em audiência", ${RESUMO}}`, 300),
-    shape: d => ({
-      decisao: d?.decisao === 'deferido' ? 'deferido' : 'indeferido',
-      text: str(d?.fundamento, 'Indeferido. Prossiga.'),
-      em_resumo: str(d?.em_resumo)
-    })
+      `FASE: audiência de instrução. Durante a inquirição de ${clip(extra.testemunha_nome, 80)}, ${extra.por === 'acusacao' ? 'a Acusação' : 'a Defesa'} fez a pergunta:\n"${clip(extra.pergunta, 600)}"\n${extra.contra === 'acusacao' ? 'A Acusação' : 'A Defesa'} protestou. Motivo alegado: ${clip(extra.motivo, 120)}.\nDecida como juiz (Art. 212 CPP: o juiz não admite perguntas que induzam a resposta, não tenham relação com a causa ou importem repetição de outra já respondida; também não se admite pergunta ofensiva ou que peça especulação/opinião da testemunha). Seja justo: protesto sem fundamento deve ser rejeitado.\nATENÇÃO ao campo "protesto_aceito": true = você CONCORDA com quem protestou e a pergunta fica VETADA (não será respondida); false = você DISCORDA do protesto e a testemunha RESPONDE. O fundamento deve ser coerente com essa escolha.\nFormato:\n{"protesto_aceito": true | false, "fundamento": "1 frase curta e firme, como dita em audiência, começando por 'Deferido.' se aceito ou 'Indeferido.' se rejeitado", ${RESUMO}}`, 300),
+    shape: d => {
+      const text = str(d?.fundamento, 'Indeferido. Prossiga.');
+      // a frase dita em audiência manda: decisão e fundamento nunca podem se contradizer na tela
+      const decisao = /^\W*indeferid/i.test(text) ? 'indeferido'
+        : /^\W*deferid/i.test(text) ? 'deferido'
+        : (d?.protesto_aceito === true || d?.decisao === 'deferido') ? 'deferido' : 'indeferido';
+      return { decisao, text, em_resumo: str(d?.em_resumo) };
+    }
   },
 
   // Pedido de diligência (carta): o juiz defere ou não, e o resultado revela um fato novo
