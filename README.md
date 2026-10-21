@@ -1,67 +1,65 @@
-# Tribunal do Casal — Demo
+# Tribunal do Casal ⚖️
 
-Versão demo com fallback local do Juiz IA (motor adaptativo). Objetivo: manter a mecânica original do jogo sem que a ausência de quota em APIs externas quebre a experiência.
+Jogo de debate jurídico para duas pessoas: uma faz a **Acusação**, a outra a **Defesa**, e um **Juiz IA** intervém no debate, faz perguntas, dá o placar e o veredito.
 
-## Arquivos principais
+No ar em: https://tribunal-eta.vercel.app
 
-- `index.html` — frontend mínimo
-- `styles.css` — estilos
-- `app.js` — lógica do chat, integração com Gemini quando disponível, fallback local
-- `judge_local.js` — motor local adaptativo (heurísticas + templates)
+## Como funciona
 
-## Como usar localmente
+- `index.html`: telas, estilos e os 8 casos (`CASES`)
+- `main.js`: salas no Firebase (tempo real), chat, juiz, veredito/recurso, cronômetro, notas
+- `ai-bridge.js`: ponto único de acesso à IA. Tenta o servidor e, se falhar, usa o juiz local.
+- `modules/ai_client.js`: chama `/api/judge` (no próprio site)
+- `api/judge.js`: função serverless do Vercel com a **fila de IAs gratuitas**
+- `judge_local.js`: juiz offline por regras. Funciona sempre, mesmo sem internet para IA.
+- `dev-server.js`: servidor para rodar no seu computador
 
-Abra `index.html` no navegador (duplo clique) para testar. Para deploy grátis, use GitHub Pages:
+### A fila de IAs (tudo gratuito)
 
-1. Crie um repositório no GitHub
-2. Adicione estes arquivos e faça push
-3. Em Settings → Pages, ative a branch `main` como source
+O servidor tenta, nesta ordem: **Groq → Gemini → Cerebras → OpenRouter**. Se uma estiver sem chave, fora do ar, lenta ou com limite estourado, passa para a próxima. Se todas falharem, o jogo usa o juiz local. Na mensagem do juiz aparece qual delas respondeu (⚡ groq, ⚡ gemini, ⚡ local…).
 
-## Chaves de API e fallback
+Basta **uma** chave para funcionar. Quanto mais chaves, mais difícil o juiz cair.
 
-O projeto suporta uma cadeia de fallback de IA para manter o Juiz estável:
+## Pegando as chaves gratuitas
 
-1. proxy `/api/judge` (quando configurado)
-2. Google Gemini
-3. Cerebras (Llama 3.3)
-4. Cloudflare AI
-5. `LocalJudge` local como fallback final
+Nenhuma pede cartão de crédito.
 
-As chaves podem ser definidas diretamente no código em `index.html` usando as variáveis globais:
+| Variável | Onde criar |
+|---|---|
+| `GROQ_KEY` | https://console.groq.com/keys → *Create API Key* |
+| `GEMINI_KEY` | https://aistudio.google.com/app/apikey → *Create API key* |
+| `CEREBRAS_KEY` | https://cloud.cerebras.ai → *API Keys* |
+| `OPENROUTER_KEY` | https://openrouter.ai/settings/keys → *Create Key* |
 
-- `window.DEFAULT_GEMINI_KEY`
-- `window.DEFAULT_CEREBRAS_KEY`
-- `window.DEFAULT_CLOUDFLARE_KEY`
+### Colocando no Vercel
 
-Isso permite que o Juiz seja ativado automaticamente no carregamento, sem precisar inserir a chave manualmente a cada vez.
+1. Abra o projeto no https://vercel.com → **Settings → Environment Variables**
+2. Adicione cada chave com o nome exato da tabela (ex.: `GROQ_KEY`)
+3. Vá em **Deployments** → no último deploy, **⋯ → Redeploy** (as variáveis só valem para deploys novos)
+4. Teste abrindo `https://tribunal-eta.vercel.app/api/judge`: deve mostrar quais IAs estão ligadas, por exemplo `{"ok":true,"providers":{"groq":true,"gemini":true,...}}`
 
-### Recomendação
+> Nunca coloque chave no código nem no GitHub. Elas ficam só no Vercel (e no seu `.env.local`, que o git ignora).
 
-- Insira sua chave Gemini para ter o melhor veredito.
-- Adicione uma chave Cerebras como fallback rápido e gratuito.
-- A chave Cloudflare é opcional e aumenta a disponibilidade adicional.
+Opcional: para trocar o modelo de alguma IA sem mexer no código, use `GROQ_MODEL`, `GEMINI_MODEL`, `CEREBRAS_MODEL` ou `OPENROUTER_MODEL`.
 
-Se nenhuma chave estiver disponível, o código ainda funciona com `judge_local.js`.
+## Rodando no computador
 
-> Importante: por segurança, não comite chaves reais no GitHub. Use o campo de configuração do app ou variáveis locais em vez de deixar credenciais embutidas no repositório.
+Precisa do Node.js 20 ou mais novo.
 
-## Próximos passos sugeridos
+```bash
+cp .env.example .env.local   # e preencha as chaves que tiver
+npm run dev                  # abre em http://localhost:3000
+```
 
-- Integrar Firebase/Supabase para multiplayer (salas, chat em tempo real)
-- Implementar função serverless (Vercel/Render) para atuar como proxy seguro para Gemini
-- Melhorar `judge_local.js` com regras específicas por caso e geração de texto mais sofisticada
+Sem chaves, o jogo funciona do mesmo jeito, só que com o juiz local.
 
-## Esqueleto de função serverless (proxy)
+## Regras da partida
 
-Incluí um esqueleto em `api_judge_skeleton.js` que demonstra como criar um endpoint seguro para rotear pedidos ao Gemini sem expor a chave no cliente.
+1. Quem cria a sala escolhe o caso e o papel, e manda o código (ou o botão **Copiar convite**) para a outra pessoa
+2. Quem entra fica com o papel que sobrou
+3. No **Debate**, o juiz entra sozinho a cada 4 mensagens, quando alguém escreve "juiz" ou pelo botão ⚖️. Toque na pergunta dele para responder.
+4. Em **Pedido**, cada lado informa a pena que quer
+5. Em **Veredito**, peçam a decisão. Cada lado pode recorrer uma vez (ou aceitar), e aí sai o veredito final.
+6. **Próximo caso** limpa a sala e começa o caso seguinte para os dois
 
-Para usar (resumo):
-
-1. Copie `api_judge_skeleton.js` para o caminho `api/judge.js` em um projeto Vercel ou Render.
-2. Defina a variável de ambiente `GEMINI_KEY` no painel do provedor.
-3. No frontend, aponte as requisições para `https://SEU_HOST/api/judge` (POST JSON `{ caseObj, messages }`).
-
-Observações:
-- O esqueleto inclui um rate-limit em memória — substitua por controle distribuído (Redis, etc.) em produção.
-- Ainda é recomendável ter o `judge_local.js` como fallback quando o proxy responder com erro ou rate-limit.
-
+Se a página recarregar ou o celular bloquear, o jogo volta sozinho para a sala.

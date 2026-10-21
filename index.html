@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Tribunal do Casal ⚖️ v7</title>
+<title>Tribunal do Casal ⚖️</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>">
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=IBM+Plex+Mono:wght@300;400;500&family=Plus+Jakarta+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -617,6 +617,28 @@ button:active{transform:scale(.98);}
 button:disabled{cursor:not-allowed;opacity:.5;}
 input:disabled{cursor:not-allowed;opacity:.5;}
 
+/* Lobby: retomar sala / entrar */
+.resume-text{font-family:var(--mono);font-size:12px;color:var(--gold2);margin-bottom:12px;}
+.join-hint{font-size:12px;color:var(--text3);margin:-4px 0 10px;}
+/* Perguntas do juiz dentro do chat */
+.judge-qs{display:flex;flex-direction:column;gap:6px;margin-top:10px;text-align:left;}
+.judge-q{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:8px;background:var(--s2);border:1px solid var(--b1);color:var(--text2);font-family:var(--sans);font-size:12.5px;line-height:1.45;cursor:default;}
+.judge-q.acusacao{border-left:3px solid var(--red2);}
+.judge-q.defesa{border-left:3px solid var(--blue2);}
+.judge-q.mine{cursor:pointer;color:var(--text);}
+.judge-q.mine:hover{background:var(--gold-d);}
+.judge-q-who{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--text3);margin-bottom:3px;}
+.msg-reply{font-family:var(--mono);font-size:10px;color:var(--gold2);opacity:.85;margin-bottom:5px;}
+.msg-provider{font-family:var(--mono);font-size:8px;color:var(--text3);margin-left:6px;letter-spacing:.06em;}
+/* Veredito e recurso */
+.verdict-score{display:flex;justify-content:center;align-items:center;gap:14px;font-family:var(--mono);font-size:22px;margin:4px 0 14px;}
+.verdict-score .acu{color:var(--red2);} .verdict-score .def{color:var(--blue2);} .verdict-score .vs{color:var(--text3);font-size:14px;}
+.recurso-box{margin-top:20px;border-top:1px solid var(--b1);padding-top:16px;}
+.recurso-status{font-family:var(--mono);font-size:10px;color:var(--green2);margin-bottom:8px;min-height:12px;}
+.recurso-inp{width:100%;background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--sans);font-size:13px;outline:none;resize:vertical;min-height:72px;margin-bottom:8px;}
+/* Parceiro offline: a bolinha da barra superior apaga */
+.gtb-badge.partner-off .online-dot{background:var(--text3);animation:none;}
+
 /* Touch improvements */
 @media(hover:none){
   button{padding:12px 16px;min-height:48px;}
@@ -634,8 +656,13 @@ input:disabled{cursor:not-allowed;opacity:.5;}
   <h1 class="lobby-title">Tribunal<br><em>do Casal</em></h1>
   <p class="lobby-sub">Debata casos reais com seu parceiro.<br>O Juiz IA lê tudo e dá o veredito.</p>
 
-  <!-- API KEY (removida para uso local) -->
-  <!-- As chaves agora são gerenciadas no servidor. O app usará o juiz local quando não houver backend disponível. -->
+  <!-- VOLTAR PARA A SALA (sessão salva neste aparelho) -->
+  <div class="lobby-card" id="card-resume" style="display:none;">
+    <div class="lc-title">// você estava jogando</div>
+    <div class="resume-text" id="resume-text"></div>
+    <button class="btn-primary" onclick="resumeSession()">VOLTAR PARA A SALA</button>
+    <button class="btn-secondary" onclick="forgetSession()" style="margin-top:8px;">Esquecer esta sala</button>
+  </div>
 
   <!-- CRIAR SALA -->
   <div class="lobby-card" id="card-create">
@@ -670,19 +697,7 @@ input:disabled{cursor:not-allowed;opacity:.5;}
   <!-- ENTRAR EM SALA -->
   <div class="lobby-card" id="card-join">
     <div class="lc-title">// entrar em sala existente</div>
-    <div class="lc-title" style="margin-bottom:8px;">seu papel</div>
-    <div class="role-grid">
-      <div class="role-chip r-acu" id="rj-acu" onclick="selectJoinRole('acusacao')">
-        <span class="rc-icon">⚔️</span>
-        <div class="rc-name">Acusação</div>
-        <div class="rc-desc">Prove a culpa e peça condenação</div>
-      </div>
-      <div class="role-chip r-def" id="rj-def" onclick="selectJoinRole('defesa')">
-        <span class="rc-icon">🛡️</span>
-        <div class="rc-name">Defesa</div>
-        <div class="rc-desc">Construa teses e proteja o réu</div>
-      </div>
-    </div>
+    <div class="join-hint">Você fica automaticamente com o papel que sobrou.</div>
     <input class="name-inp" id="inp-name-join" type="text" placeholder="Seu nome" maxlength="20">
     <div class="room-row">
       <input class="room-inp" id="inp-room-code" type="text" placeholder="CÓDIGO DA SALA" maxlength="4">
@@ -700,8 +715,9 @@ input:disabled{cursor:not-allowed;opacity:.5;}
         <div class="gc-label">CÓDIGO DA SALA</div>
         <div class="gc-code" id="waiting-code">----</div>
       </div>
+      <button class="btn-primary" onclick="copyRoomCode()" style="margin-bottom:16px;">📋 COPIAR CONVITE</button>
       <div class="players-list" id="players-list"></div>
-      <button class="btn-secondary" onclick="startAnySolo()" style="margin-top:12px;">Jogar solo (sem parceiro)</button>
+      <button class="btn-secondary" onclick="startAnySolo()" style="margin-top:12px;">Treinar sozinho (sem parceiro)</button>
     </div>
   </div>
 </div>
@@ -765,7 +781,7 @@ input:disabled{cursor:not-allowed;opacity:.5;}
           <button class="chat-send judge" id="btn-judge" title="Chamar o Juiz">⚖️</button>
           <button class="chat-send" id="btn-send">ENVIAR</button>
         </div>
-        <div style="text-align:center;padding:4px 0 2px;font-family:var(--mono);font-size:9px;color:var(--text3);">⚖️ clique para chamar o juiz · ele também responde automaticamente</div>
+        <div style="text-align:center;padding:4px 0 2px;font-family:var(--mono);font-size:9px;color:var(--text3);">⚖️ chama o juiz · ele também entra sozinho a cada 4 mensagens ou se vocês falarem "juiz"</div>
       </div>
     </div><!-- /tab-chat -->
 
@@ -872,7 +888,7 @@ input:disabled{cursor:not-allowed;opacity:.5;}
           <div class="notas-pad">
             <div class="notas-header-row">
               <span class="notas-title">bloco de notas</span>
-              <span class="notas-badge">PRIVADO — só você vê</span>
+              <span class="notas-badge">PRIVADO — fica só neste aparelho</span>
             </div>
             <textarea class="notas-ta" id="notas-ta" placeholder="Anote seus argumentos, estratégias, pontos a explorar...\n\n💡 Use o 🤖 Assistente IA ao lado para pedir dicas de estratégia — privado também!"></textarea>
             <div class="notas-footer">
@@ -889,13 +905,8 @@ input:disabled{cursor:not-allowed;opacity:.5;}
               <span class="ia-assist-icon">🤖</span>
               <div class="ia-assist-info">
                 <div class="ia-assist-name">Assistente de Estratégia</div>
-                <div class="ia-assist-desc">Chat privado · só você vê · powered by Claude</div>
+                <div class="ia-assist-desc">Chat privado · só você vê</div>
               </div>
-            </div>
-            <div id="ia-nokey-warn" class="ia-nokey-msg" style="display:none;">
-              ⚠️ Sem chave Gemini ativa. O assistente IA precisa de uma chave Gemini gratuita.<br>
-              <a href="https://aistudio.google.com/app/apikey" target="_blank">Obter chave grátis →</a><br>
-              Cole a chave no lobby para ativar.
             </div>
             <div class="ia-chat-msgs" id="ia-chat-msgs">
               <div class="ia-welcome-msg">
@@ -982,139 +993,6 @@ const firebaseConfig = {
 };
 // Expor a config para módulos externos
 window.firebaseConfig = firebaseConfig;
-
-// ═══════════════════════════════════════════════════════
-// API Keys — Gemini + Cerebras + Cloudflare
-// ═══════════════════════════════════════════════════════
-// Defina aqui as chaves padrão se quiser ativar automaticamente sem digitar na UI.
-// NÃO deixe chaves reais comitadas no repositório público.
-window.DEFAULT_GEMINI_KEY = '';
-window.DEFAULT_CEREBRAS_KEY = '';
-window.DEFAULT_CLOUDFLARE_KEY = '';
-let geminiKey = localStorage.getItem('tribunal_gemini_key') || window.DEFAULT_GEMINI_KEY || '';
-let cerebrasKey = localStorage.getItem('tribunal_cerebras_key') || window.DEFAULT_CEREBRAS_KEY || '';
-let cloudflareKey = localStorage.getItem('tribunal_cloudflare_key') || window.DEFAULT_CLOUDFLARE_KEY || '';
-
-// Histórico do Juiz para conversa contínua e inteligente
-let judgeHistory = [];
-
-// Converte histórico {role,content} para formato Gemini {role,parts:[{text}]}
-function toGeminiHistory(messages) {
-  return messages.map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }]
-  }));
-}
-
-async function callCerebras(systemPrompt, userPrompt, maxTokens=1000, history=[]) {
-  const prompt = [
-    { role:'system', content: systemPrompt },
-    ...history,
-    { role:'user', content: userPrompt }
-  ].map(m => `${m.role}: ${m.content || ''}`).join('\n');
-  const url = 'https://api.cerebras.net/v1/generate';
-  const headers = { 'Content-Type': 'application/json' };
-  if (cerebrasKey) headers.Authorization = `Bearer ${cerebrasKey}`;
-  const body = { model:'llama-3.3', input: prompt, max_output_tokens:maxTokens, temperature:0.8, top_p:0.95 };
-  const resp = await fetch(url, { method:'POST', headers, body:JSON.stringify(body) });
-  const data = await resp.json();
-  if (!resp.ok) throw new Error(data?.error?.message || 'cerebras_error');
-  if (typeof data.text === 'string') return data.text;
-  if (Array.isArray(data?.results)) return data.results.map(r=>r.output || '').join('\n');
-  return JSON.stringify(data);
-}
-
-async function callLocalAI(systemPrompt, userPrompt, maxTokens=800, history=[]) {
-  if (!window.localJudgeAnalyze) throw new Error('localJudge unavailable');
-  const caseObj = { titulo:'Assistente IA', context_juiz: userPrompt };
-  const msgs = [...history, { sender:'Usuário', role:'user', text:userPrompt }];
-  const local = window.LocalJudge.generateIntervention(caseObj, msgs);
-  return `${local.text}\n\n(placar simulado: ${local.score.acusacao}×${local.score.defesa})`;
-}
-
-async function callAI(systemPrompt, userPrompt, maxTokens=800, history=[]) {
-  try {
-    if (geminiKey) return await callGemini(systemPrompt, [...history, { role:'user', content:userPrompt }], maxTokens);
-  } catch(e){ console.warn('Gemini falhou, tentando Cerebras', e.message||e); }
-
-  try {
-    return await callCerebras(systemPrompt, userPrompt, maxTokens, history);
-  } catch(e){ console.warn('Cerebras falhou, tentando fallback local', e.message||e); }
-
-  return await callLocalAI(systemPrompt, userPrompt, maxTokens, history);
-}
-
-function onApiKeyInput() {
-  const val = document.getElementById('inp-apikey').value.trim();
-  geminiKey = val;
-  const box = document.getElementById('apikey-status-box');
-  if (val.startsWith('AIza') && val.length > 20) {
-    localStorage.setItem('tribunal_gemini_key', val);
-    box.style.display = 'block';
-    box.innerHTML = '<div class="apikey-status ok">✓ Chave Gemini salva como backup</div>';
-  } else if (val.length > 5) {
-    box.style.display = 'block';
-    box.innerHTML = '<div class="apikey-status no">⚠ Formato inválido (deve começar com AIza...)</div>';
-  } else {
-    localStorage.removeItem('tribunal_gemini_key');
-    box.style.display = 'none';
-  }
-}
-
-function onCerebrasKeyInput() {
-  const val = document.getElementById('inp-cerebras-key').value.trim();
-  cerebrasKey = val;
-  const box = document.getElementById('cerebras-status-box');
-  if (val.length > 10) {
-    localStorage.setItem('tribunal_cerebras_key', val);
-    box.style.display = 'block';
-    box.innerHTML = '<div class="apikey-status ok">✓ Chave Cerebras salva como fallback</div>';
-  } else if (val.length > 0) {
-    localStorage.removeItem('tribunal_cerebras_key');
-    box.style.display = 'block';
-    box.innerHTML = '<div class="apikey-status no">⚠ Chave Cerebras inválida ou incompleta</div>';
-  } else {
-    localStorage.removeItem('tribunal_cerebras_key');
-    box.style.display = 'none';
-  }
-}
-
-function onCloudflareKeyInput() {
-  const val = document.getElementById('inp-cloudflare-key').value.trim();
-  const box = document.getElementById('cloudflare-status-box');
-  if (val.length > 10) {
-    localStorage.setItem('tribunal_cloudflare_key', val);
-    box.style.display = 'block';
-    box.innerHTML = '<div class="apikey-status ok">✓ Cloudflare ativada como fallback</div>';
-  } else if (val.length > 0) {
-    localStorage.removeItem('tribunal_cloudflare_key');
-    box.style.display = 'block';
-    box.innerHTML = '<div class="apikey-status no">⚠ Cloudflare inválida ou incompleta</div>';
-  } else {
-    localStorage.removeItem('tribunal_cloudflare_key');
-    box.style.display = 'none';
-  }
-}
-
-function initApiKeyUI() {
-  const gemBox = document.getElementById('apikey-status-box');
-  const cerBox = document.getElementById('cerebras-status-box');
-  const cfBox = document.getElementById('cloudflare-status-box');
-  // As chaves agora estão no Vercel (process.env) — mostrar status local
-  if (gemBox) {
-    gemBox.style.display = 'block';
-    gemBox.innerHTML = '<div class="apikey-status ok">✓ Juiz IA conectado ao servidor seguro</div>';
-  }
-  if (cerBox) cerBox.style.display = 'none';
-  if (cfBox) cfBox.style.display = 'none';
-}
-
-function clearApiKey() {
-  geminiKey = ''; localStorage.removeItem('tribunal_gemini_key');
-  const inp = document.getElementById('inp-apikey'); if (inp) inp.value = '';
-}
-
-document.addEventListener('DOMContentLoaded', initApiKeyUI);
 
 // ═══════════════════════════════════════════════════════
 // DADOS DOS CASOS — 8 casos (5 originais + 3 novos complexos)
@@ -1569,31 +1447,11 @@ ARTIGOS: Art. 121 §2º,III (veneno), §2º,I (motivo torpe), Art. 14,II (tentat
   },
 ];
 
-// ═══════════════════════════════════════════════════════
-// STATE
-// State, Firebase refs e funções de inicialização são gerenciados por main.js
-// Este arquivo contém apenas as variáveis necessárias para o escopo global
-// e as funções de UI específicas (API key, etc.)
-
-// Funções de sala e lobby delegadas para main.js (ES module)
-// initLobby, selectCase, selectRole, selectJoinRole, createRoom, joinRoom, 
-// showWaiting, updateWaitingUI, startAnySolo, setupRealtimeListeners, launchGame
-// são todas exportadas de main.js e vinculadas ao escopo global pelo módulo.
-
-if (typeof window !== 'undefined') {
-  window.CASES = CASES;
-}
-
-// (file truncated here to fit patch size)
+// Toda a lógica do jogo fica em main.js (que importa ai-bridge.js e judge_local.js).
+window.CASES = CASES;
 </script>
 
-<!-- Módulos de IA e app principal (ES modules) -->
-<script type="module" src="./ai-bridge.js"></script>
-<script type="module" src="./modules/ai_client.js"></script>
-<script type="module" src="./judge_local.js"></script>
 <script type="module" src="./main.js"></script>
-
-<!-- Removed legacy polling binder; initUI in main.js performs bindings via addEventListener -->
 
 </body>
 </html>
