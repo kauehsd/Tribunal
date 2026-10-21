@@ -144,6 +144,13 @@ export function normalizeCase(d) {
   };
 }
 
+// Palavras relevantes de um texto (sem acento; 4+ letras, ou qualquer coisa com número, como "2h05")
+const STOP = new Set(['para', 'pela', 'pelo', 'como', 'mais', 'mas', 'que', 'isso', 'esse', 'essa', 'este', 'esta', 'entao', 'quando', 'onde', 'porque', 'sobre', 'muito', 'tinha', 'estava', 'disse', 'diz', 'falou', 'ele', 'ela', 'eles', 'elas', 'uma', 'umas', 'uns', 'dos', 'das', 'nos', 'nas', 'com', 'sem', 'foi', 'era', 'ser', 'ter', 'tem']);
+function palavras(t) {
+  const norm = String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  return new Set((norm.match(/[a-z0-9]+/g) || []).filter(w => !STOP.has(w) && (w.length >= 4 || /\d/.test(w))));
+}
+
 // A testemunha só recebe a SUA versão (a parte antes do "— mas"), nunca a prova que a desmente.
 // "Ele diz que o alarme tocou às 2h05 — mas a câmera…" → "o alarme tocou às 2h05"
 function versaoErrada(t) {
@@ -223,15 +230,25 @@ export const MODES = {
     build: (c, m, extra) => {
       const t = extra.testemunha || {};
       const depo = list(extra.depoimentos).map(d => `- Pergunta: "${clip(d.pergunta, 300)}" → Resposta: "${clip(d.resposta, 400)}"`).join('\n') || '(nenhum depoimento ainda)';
-      return judgePrompt(c, extra,
-        `FASE: audiência de instrução. ${extra.por === 'acusacao' ? 'A Acusação' : 'A Defesa'} aponta uma CONTRADIÇÃO no depoimento de ${clip(t.nome, 80)}:\n"${clip(extra.alegacao, 600)}"\n\nO QUE ${String(t.nome || '').toUpperCase()} DISSE EM JUÍZO:\n${depo}\n\nINFORMAÇÃO RESERVADA AO JUIZ (o jogador não a vê): o ponto em que este depoimento conflita com as provas é: ${clip(t.contradicao || 'nenhum ponto específico', 400)}\n\nAvalie SOMENTE a alegação do jogador, entre aspas acima. Ela PROCEDE apenas se as duas coisas forem verdade: (1) a testemunha realmente disse, no depoimento acima, o que o jogador afirma que ela disse; e (2) isso conflita de fato com uma prova dos autos ou com outro depoimento. Se o jogador apontou algo que a testemunha não disse, algo que não conflita com nada, ou um tema diferente do conflito real, NÃO PROCEDE, mesmo que exista outra contradição que o jogador não percebeu (não revele essa outra contradição no fundamento).\nExemplos: testemunha disse "o alarme tocou às 2h05" e a câmera registra 2h14 → jogador aponta isso → procede. Jogador alega "ela disse que o réu estava armado" mas ela não disse → não procede.\nFormato:\n{"o_que_o_jogador_alegou": "resuma em 1 frase", "a_testemunha_disse_isso": true | false, "procede": true | false, "fundamento": "2 frases, em tom de audiência, sobre a alegação do jogador", ${RESUMO}}`, 500);
+      const p = judgePrompt(c, extra,
+        `FASE: audiência de instrução. ${extra.por === 'acusacao' ? 'A Acusação' : 'A Defesa'} aponta uma CONTRADIÇÃO no depoimento de ${clip(t.nome, 80)}:\n"${clip(extra.alegacao, 600)}"\n\nO QUE ${String(t.nome || '').toUpperCase()} DISSE EM JUÍZO:\n${depo}\n\nAvalie SOMENTE a alegação do jogador, entre aspas acima. Ela PROCEDE apenas se: (1) a testemunha realmente disse, no depoimento acima, aquilo que o jogador atribui a ela; e (2) isso conflita com uma prova dos autos (lista de PROVAS do caso) ou com outro depoimento. Não procure outras contradições por conta própria: se a alegação for vaga ("ela está mentindo"), atribuir algo que a testemunha não disse, ou não apontar conflito concreto, NÃO PROCEDE.\nPara decidir, copie LITERALMENTE o trecho do depoimento que o jogador está contestando e a prova que o contradiz. Se não houver trecho, deixe vazio.\nFormato:\n{"trecho_do_depoimento": "cópia literal de 3 a 15 palavras do depoimento, ou vazio", "prova_que_contradiz": "a prova ou o depoimento que conflita, ou vazio", "procede": true | false, "fundamento": "2 frases, em tom de audiência, sobre a alegação do jogador", ${RESUMO}}`, 500);
+      return { ...p, reasoning: 'medium' };
     },
-    shape: d => ({
-      // se a própria IA disse que a testemunha não afirmou aquilo, não pode proceder
-      procede: d?.procede === true && d?.a_testemunha_disse_isso !== false,
-      text: str(d?.fundamento, 'Não vislumbro contradição relevante.'),
-      em_resumo: str(d?.em_resumo)
-    })
+    shape: (d, extra) => {
+      // Conferência que não depende da IA: o trecho citado precisa existir no depoimento
+      // e precisa ser sobre o mesmo assunto que o jogador alegou.
+      const depoimento = list(extra.depoimentos).map(x => x.resposta).join(' ');
+      const trecho = str(d?.trecho_do_depoimento);
+      const doDepo = palavras(depoimento), doTrecho = palavras(trecho), daAlegacao = palavras(extra.alegacao);
+      const trechoExiste = doTrecho.size > 0 && [...doTrecho].filter(w => doDepo.has(w)).length >= Math.max(2, Math.ceil(doTrecho.size * 0.6));
+      const mesmoAssunto = [...doTrecho].filter(w => daAlegacao.has(w)).length >= 2;
+      const procede = d?.procede === true && trechoExiste && mesmoAssunto && Boolean(str(d?.prova_que_contradiz));
+      return {
+        procede,
+        text: procede ? str(d?.fundamento) : (d?.procede === true ? 'Não procede. O que foi apontado não corresponde ao que a testemunha declarou em juízo.' : str(d?.fundamento, 'Não vislumbro contradição relevante.')),
+        em_resumo: procede ? str(d?.em_resumo) : 'O juiz não viu contradição no que foi apontado.'
+      };
+    }
   },
 
   // Gera um caso inédito completo (com dossiê): crimes variados, contradições e duas reviravoltas
