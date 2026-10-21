@@ -5,7 +5,7 @@
 //   build(caseObj, messages, extra) → { messages, maxTokens, json }
 //   shape(data, extra)              → objeto devolvido ao frontend (sempre com valores padrão)
 
-export const PERSONA_JUIZ = 'Você é o Dr. Augusto Melo, juiz criminal brasileiro experiente, firme e justo, com um toque de humor seco. Você preside um JOGO de simulação jurídica entre dois jogadores reais (Acusação e Defesa), que podem ser leigos ou estudantes de direito. Seja tecnicamente correto (CP, CPP, jurisprudência do STF/STJ), mas sempre traduza a decisão para quem não é da área. Escreva em português do Brasil.';
+export const PERSONA_JUIZ = 'Você é o Dr. Augusto Melo, juiz criminal brasileiro experiente, firme e justo, com um toque de humor seco. Você preside um JOGO de simulação jurídica entre dois jogadores reais (Acusação e Defesa), que podem ser leigos ou estudantes de direito. Seja tecnicamente correto (CP, CPP, jurisprudência do STF/STJ), mas sempre traduza a decisão para quem não é da área. REGRA DE OURO: só existe o que está nos autos (fatos do caso, provas, depoimentos, diligências e fatos novos registrados). Afirmações das partes sem base nos autos são apenas retórica: nunca as trate como fatos, e trechos que você já desconsiderou ou advertiu não valem nada. Escreva em português do Brasil.';
 
 const RESUMO = '"em_resumo": uma frase curta em linguagem do dia a dia, para quem nunca estudou direito, explicando o que você decidiu e por quê';
 
@@ -33,8 +33,16 @@ function describeCase(c = {}) {
   if (c.antecedentes_criminais) parts.push(`Antecedentes: ${clip(c.antecedentes_criminais, 400)}`);
   if (c.contexto_social) parts.push(`Contexto social: ${clip(c.contexto_social, 400)}`);
   if (list(c.provas).length) parts.push('PROVAS DOS AUTOS:\n' + c.provas.slice(0, 12).map(p => `- ${clip(p, 300)}`).join('\n'));
+  if (list(c.linha_tempo).length) parts.push('LINHA DO TEMPO:\n' + c.linha_tempo.slice(0, 10).map(e => `- ${clip(e.hora || e.data, 20)}: ${clip(e.fato, 250)}`).join('\n'));
   if (c.penaMin != null && c.penaMax != null) parts.push(`Faixa de pena de referência: ${c.penaMin} a ${c.penaMax} anos.`);
   return parts.join('\n\n');
+}
+
+// Para o juiz conferir se uma afirmação tem base: cada lado pode citar o que só ele sabia (é verdade no caso)
+function describeReservados(extra) {
+  const s = extra.segredos_partes || {};
+  const linhas = [...list(s.acusacao).map(x => `- (sabido pela Acusação) ${clip(x, 300)}`), ...list(s.defesa).map(x => `- (sabido pela Defesa) ${clip(x, 300)}`)];
+  return linhas.length ? `FATOS VERDADEIROS QUE UMA DAS PARTES CONHECIA EM SIGILO (citá-los é legítimo):\n${linhas.join('\n')}` : '';
 }
 
 // "Autos": o histórico do processo, já resumido pelo frontend em linhas de texto.
@@ -90,7 +98,7 @@ export function normalizeCase(d) {
   const penaMin = Math.max(0, Number(d.penaMin) || 1);
   const penaMax = Math.max(penaMin + 1, Number(d.penaMax) || penaMin + 4);
   const tagColors = ['tr', 'tb', 'tg'];
-  let testemunhas = list(d.testemunhas).slice(0, 4).map((t, i) => ({
+  let testemunhas = list(d.testemunhas).slice(0, 5).map((t, i) => ({
     id: slugId(t?.id || t?.nome, i),
     nome: txt(t?.nome, 60) || `Depoente ${i + 1}`,
     emoji: firstEmoji(t?.emoji),
@@ -116,8 +124,8 @@ export function normalizeCase(d) {
     tags: txts(d.tags, 3, 40).map((t, i) => ({ t: t.toUpperCase(), c: tagColors[i % 3] })),
     corpo,
     hot: txts(d.hot, 4, 200),
-    perguntas_acu: txts(d.perguntas_acu, 3, 200),
-    perguntas_def: txts(d.perguntas_def, 3, 200),
+    perguntas_acu: txts(d.pontos_acu || d.perguntas_acu, 4, 220),
+    perguntas_def: txts(d.pontos_def || d.perguntas_def, 4, 220),
     penaMin, penaMax, penaBase: penaMin,
     agravantes: list(d.agravantes).slice(0, 3).map(a => ({ t: txt(a?.t, 80), ef: txt(a?.ef, 30) || '+1/6', tipo: 'agg' })),
     majorantes: list(d.majorantes).slice(0, 3).map(a => ({ t: txt(a?.t, 80), ef: txt(a?.ef, 30) || '-1/6', tipo: /^-/.test(str(a?.ef)) ? 'ate' : 'agg' })),
@@ -127,7 +135,7 @@ export function normalizeCase(d) {
     antecedentes: txt(d.antecedentes, 300),
     antecedentes_criminais: txt(d.antecedentes_criminais, 300),
     contexto_social: txt(d.contexto_social, 300),
-    provas: txts(d.provas, 8, 300),
+    provas: txts(d.provas, 10, 300),
     linha_tempo: list(d.linha_tempo).slice(0, 8).map(e => ({ hora: txt(e?.hora || e?.data, 20), fato: txt(e?.fato, 250) })),
     dossie: {
       rito: d.rito === 'juri' ? 'juri' : 'comum',
@@ -149,6 +157,13 @@ const STOP = new Set(['para', 'pela', 'pelo', 'como', 'mais', 'mas', 'que', 'iss
 function palavras(t) {
   const norm = String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   return new Set((norm.match(/[a-z0-9]+/g) || []).filter(w => !STOP.has(w) && (w.length >= 4 || /\d/.test(w))));
+}
+
+// O trecho citado pela IA existe mesmo no texto? (pelo menos 70% das palavras relevantes, e no mínimo 2)
+function trechoNoTexto(trecho, texto) {
+  const t = palavras(trecho), base = palavras(texto);
+  if (t.size < 2) return false;
+  return [...t].filter(w => base.has(w)).length >= Math.max(2, Math.ceil(t.size * 0.7));
 }
 
 // A testemunha só recebe a SUA versão (a parte antes do "— mas"), nunca a prova que a desmente.
@@ -188,7 +203,7 @@ export const MODES = {
         temperature: 0.8,
         messages: [
           { role: 'system', content: `Você é um ATOR interpretando ${t.nome}, ${t.papel_txt || 'testemunha'} num processo criminal brasileiro, durante a audiência de instrução de um jogo de simulação. Fique 100% no personagem: fale em primeira pessoa, como uma pessoa real falaria em juízo (nervosa, defensiva, emocionada ou técnica, conforme o perfil). Nunca saia do personagem, nunca fale de "jogo" ou de "IA". Português do Brasil.` },
-          { role: 'user', content: `${describeCase(c)}\n\nSUA FICHA:\nPerfil: ${clip(t.perfil, 600)}\nO que você conta espontaneamente: ${clip(t.depoimento, 900)}\nSegredos (só revele um se a pergunta tocar DIRETAMENTE nele; se perguntarem de forma vaga, desconverse; se a pergunta for muito precisa, você não pode mentir sob compromisso e deve admitir): ${list(t.segredos).map((s, i) => `(${i + 1}) ${clip(s, 300)}`).join(' ') || 'nenhum'}\n${versaoErrada(t) ? `Um detalhe da sua lembrança (você tem CERTEZA dele): ${versaoErrada(t)}.\nSempre que contar o que aconteceu (perguntas abertas como "o que você viu?", "conte como foi") ou quando a pergunta tocar nesse assunto, afirme esse detalhe com naturalidade e com o dado concreto, como fato. Se alguém disser que uma prova mostra outra coisa, fique surpreso(a) e mantenha a sua lembrança, talvez com um pouco de hesitação.\n` : ''}Sua postura: você foi chamado(a) por ${t.arrolada_por === 'defesa' ? 'a defesa' : t.arrolada_por === 'acusacao' ? 'a acusação' : 'o juízo'}; ${t.papel === 'reu' ? 'você é o réu: pode se defender, minimizar, mas não confessa o que não está nos segredos.' : 'você presta compromisso de dizer a verdade, mas é humano e tem lado.'}\n\n${anteriores ? `PERGUNTAS JÁ FEITAS A VOCÊ:\n${anteriores}\n\n` : ''}AGORA ${quem.toUpperCase()} PERGUNTA:\n"${clip(extra.pergunta, 600)}"\n\nResponda em no máximo 3 frases, só sobre o que foi perguntado, sem inventar fatos que contradigam a ficha ou as provas. "revelou_segredo" é true SOMENTE se nesta resposta você contou um segredo da ficha que ainda NÃO apareceu em nenhuma resposta anterior (repetir algo já dito é false). Formato json:\n{"resposta": "sua fala", "revelou_segredo": true|false, "tom": "uma palavra: calmo, nervoso, emocionado, hostil, evasivo, técnico ou firme"}` }
+          { role: 'user', content: `${describeCase(c)}\n\nSUA FICHA:\nPerfil: ${clip(t.perfil, 600)}\nO que você conta espontaneamente: ${clip(t.depoimento, 900)}\nSegredos (só revele um se a pergunta tocar DIRETAMENTE nele; se perguntarem de forma vaga, desconverse; se a pergunta for muito precisa, você não pode mentir sob compromisso e deve admitir): ${list(t.segredos).map((s, i) => `(${i + 1}) ${clip(s, 300)}`).join(' ') || 'nenhum'}\n${versaoErrada(t) ? `Um detalhe da sua lembrança (você tem CERTEZA dele): ${versaoErrada(t)}.\nSempre que contar o que aconteceu (perguntas abertas como "o que você viu?", "conte como foi") ou quando a pergunta tocar nesse assunto, afirme esse detalhe com naturalidade e com o dado concreto, como fato. Se alguém disser que uma prova mostra outra coisa, fique surpreso(a) e mantenha a sua lembrança, talvez com um pouco de hesitação.\n` : ''}Sua postura: você foi chamado(a) por ${t.arrolada_por === 'defesa' ? 'a defesa' : t.arrolada_por === 'acusacao' ? 'a acusação' : 'o juízo'}; ${t.papel === 'reu' ? 'você é o réu: pode se defender, minimizar, mas não confessa o que não está nos segredos.' : 'você presta compromisso de dizer a verdade, mas é humano e tem lado.'}\n\n${anteriores ? `PERGUNTAS JÁ FEITAS A VOCÊ:\n${anteriores}\n\n` : ''}AGORA ${quem.toUpperCase()} PERGUNTA:\n"${clip(extra.pergunta, 600)}"\n\nResponda em no máximo 3 frases, só sobre o que foi perguntado, sem inventar fatos que contradigam a ficha ou as provas. Se a pergunta afirmar como fato algo que você não sabe e que não está na sua ficha nem nas provas (uma premissa falsa, como "você viu a arma, não viu?" quando não havia arma), NÃO confirme: corrija ou diga que não sabe disso. "revelou_segredo" é true SOMENTE se nesta resposta você contou um segredo da ficha que ainda NÃO apareceu em nenhuma resposta anterior (repetir algo já dito é false). Formato json:\n{"resposta": "sua fala", "revelou_segredo": true|false, "tom": "uma palavra: calmo, nervoso, emocionado, hostil, evasivo, técnico ou firme"}` }
         ]
       };
     },
@@ -202,7 +217,7 @@ export const MODES = {
   // "Protesto, Excelência!" — o juiz decide se a pergunta pode ser feita
   protesto: {
     build: (c, m, extra) => judgePrompt(c, extra,
-      `FASE: audiência de instrução. Durante a inquirição de ${clip(extra.testemunha_nome, 80)}, ${extra.por === 'acusacao' ? 'a Acusação' : 'a Defesa'} fez a pergunta:\n"${clip(extra.pergunta, 600)}"\n${extra.contra === 'acusacao' ? 'A Acusação' : 'A Defesa'} protestou. Motivo alegado: ${clip(extra.motivo, 120)}.\nDecida como juiz (Art. 212 CPP: o juiz não admite perguntas que induzam a resposta, não tenham relação com a causa ou importem repetição de outra já respondida; também não se admite pergunta ofensiva ou que peça especulação/opinião da testemunha). Seja justo: protesto sem fundamento deve ser rejeitado.\nATENÇÃO ao campo "protesto_aceito": true = você CONCORDA com quem protestou e a pergunta fica VETADA (não será respondida); false = você DISCORDA do protesto e a testemunha RESPONDE. O fundamento deve ser coerente com essa escolha.\nFormato:\n{"protesto_aceito": true | false, "fundamento": "1 frase curta e firme, como dita em audiência, começando por 'Deferido.' se aceito ou 'Indeferido.' se rejeitado", ${RESUMO}}`, 300),
+      `FASE: audiência de instrução. Durante a inquirição de ${clip(extra.testemunha_nome, 80)}, ${extra.por === 'acusacao' ? 'a Acusação' : 'a Defesa'} fez a pergunta:\n"${clip(extra.pergunta, 600)}"\n${extra.contra === 'acusacao' ? 'A Acusação' : 'A Defesa'} protestou. Motivo alegado: ${clip(extra.motivo, 120)}.\nDecida como juiz (Art. 212 CPP: o juiz não admite perguntas que induzam a resposta, não tenham relação com a causa ou importem repetição de outra já respondida; também não se admite pergunta ofensiva, que peça especulação/opinião da testemunha, ou que parta de premissa falsa — afirmar como fato algo que não consta dos autos). Seja justo: protesto sem fundamento deve ser rejeitado.\nATENÇÃO ao campo "protesto_aceito": true = você CONCORDA com quem protestou e a pergunta fica VETADA (não será respondida); false = você DISCORDA do protesto e a testemunha RESPONDE. O fundamento deve ser coerente com essa escolha.\nFormato:\n{"protesto_aceito": true | false, "fundamento": "1 frase curta e firme, como dita em audiência, começando por 'Deferido.' se aceito ou 'Indeferido.' se rejeitado", ${RESUMO}}`, 300),
     shape: d => {
       const text = str(d?.fundamento, 'Indeferido. Prossiga.');
       // a frase dita em audiência manda: decisão e fundamento nunca podem se contradizer na tela
@@ -223,6 +238,53 @@ export const MODES = {
       fato_usado: int(d?.fato_usado, -1, 50, -1),
       em_resumo: str(d?.em_resumo)
     })
+  },
+
+  // Fiscal dos autos: o juiz confere cada peça das partes (fatos inventados, calúnia, ofensa, fora do caso)
+  fiscal: {
+    build: (c, m, extra) => {
+      const p = extra.peca || {};
+      const quem = p.por === 'acusacao' ? 'Acusação' : 'Defesa';
+      const r = judgePrompt(c, extra,
+        `${describeReservados(extra)}\n\nTAREFA: conferir a peça abaixo, apresentada agora pela ${quem}, ANTES que ela produza efeitos.\nPEÇA (${clip(p.tipo, 40)}):\n"""${clip(p.texto, 3000)}"""\n\nAponte SOMENTE violações claras:\n- "fato_inventado": afirma como FATO algo concreto (algo que aconteceu, foi dito, encontrado ou confessado) que NÃO consta do caso, dos autos nem dos fatos sigilosos verdadeiros acima, e que é relevante para o julgamento.\n- "calunia": acusa de crime ou de conduta desonesta o advogado/promotor adversário, o juiz, uma testemunha ou qualquer pessoa, sem nenhuma base nos autos (ex.: "o promotor forjou o laudo", "a defesa subornou a testemunha"). Dizer que a testemunha se contradisse ou se enganou, apontando o motivo, NÃO é calúnia.\n- "ofensa": insulto pessoal ao adversário (não aos argumentos dele).\n- "fora_do_caso": conteúdo sem relação com o processo.\nNÃO são violações: argumentos, interpretações, teses jurídicas, citação de leis e jurisprudência, hipóteses apresentadas como hipóteses ("é possível que…", "não se descarta…"), conclusões razoáveis tiradas das provas, apelos emocionais, exageros retóricos e qualquer fato que esteja no caso ou nos autos (mesmo com outras palavras). Na dúvida, NÃO aponte: punir um jogador honesto é pior do que deixar passar.\nPara cada violação, copie LITERALMENTE o trecho da peça (3 a 25 palavras).\nFormato:\n{"violacoes": [{"tipo": "fato_inventado" | "calunia" | "ofensa" | "fora_do_caso", "trecho": "cópia literal", "explicacao": "1 frase: por que não tem base nos autos"}], "advertencia": "se houver violação, sua fala ao advertir a parte (2 frases, firme, em tom de audiência); senão vazio", ${RESUMO}}`, 700);
+      return { ...r, temperature: 0.2 };
+    },
+    shape: (d, extra) => {
+      const texto = str(extra.peca?.texto);
+      const tipos = ['fato_inventado', 'calunia', 'ofensa', 'fora_do_caso'];
+      // só vale o que foi copiado de verdade da peça (a IA não pode punir por algo que a parte não escreveu)
+      const violacoes = list(d?.violacoes)
+        .filter(v => tipos.includes(v?.tipo) && trechoNoTexto(v?.trecho, texto))
+        .slice(0, 3)
+        .map(v => ({ tipo: v.tipo, trecho: clip(str(v.trecho), 200), explicacao: clip(str(v.explicacao), 300) }));
+      return {
+        violacoes,
+        text: violacoes.length ? str(d?.advertencia, 'Advirto a parte: o que não está nos autos não existe para este juízo.') : '',
+        em_resumo: violacoes.length ? str(d?.em_resumo, 'O juiz desconsiderou um trecho sem base nas provas e puniu quem escreveu.') : ''
+      };
+    }
+  },
+
+  // "Questão de ordem, Excelência!" — uma parte impugna algo que a outra afirmou sem base nos autos
+  impugnacao: {
+    build: (c, m, extra) => {
+      const p = extra.peca || {};
+      const r = judgePrompt(c, extra,
+        `${describeReservados(extra)}\n\nQUESTÃO DE ORDEM: ${extra.por === 'acusacao' ? 'a Acusação' : 'a Defesa'} afirma que a peça abaixo, da ${p.por === 'acusacao' ? 'Acusação' : 'Defesa'}, alegou algo sem base nos autos.\nPEÇA IMPUGNADA (${clip(p.tipo, 40)}):\n"""${clip(p.texto, 3000)}"""\n\nIMPUGNAÇÃO: "${clip(extra.alegacao, 600)}"\n\nDecida SOMENTE sobre o que foi impugnado. PROCEDE se: (1) a peça realmente afirma aquilo; e (2) é afirmado como fato (ou é uma acusação de crime/ofensa) sem base no caso, nos autos ou nos fatos sigilosos verdadeiros acima. NÃO PROCEDE se o fato está nos autos (mesmo com outras palavras), se é argumento/interpretação/hipótese, ou se a peça não diz aquilo. Copie LITERALMENTE o trecho da peça que foi impugnado.\nFormato:\n{"trecho": "cópia literal de 3 a 25 palavras da peça, ou vazio", "procede": true | false, "fundamento": "2 frases em tom de audiência", ${RESUMO}}`, 450);
+      return { ...r, temperature: 0.2 };
+    },
+    shape: (d, extra) => {
+      const texto = str(extra.peca?.texto);
+      const trecho = str(d?.trecho);
+      const mesmoAssunto = [...palavras(trecho)].filter(w => palavras(extra.alegacao).has(w)).length >= 1;
+      const procede = d?.procede === true && trechoNoTexto(trecho, texto) && mesmoAssunto;
+      return {
+        procede,
+        trecho: procede ? clip(trecho, 200) : '',
+        text: procede ? str(d?.fundamento) : (d?.procede === true ? 'Não procede. O que foi impugnado não corresponde ao que a parte escreveu.' : str(d?.fundamento, 'Não procede: o que foi dito tem base nos autos.')),
+        em_resumo: procede ? str(d?.em_resumo) : 'O juiz considerou que a parte não inventou nada nesse ponto.'
+      };
+    }
   },
 
   // "Excelência, há uma contradição!" — o juiz verifica se o jogador pegou a testemunha
@@ -255,16 +317,16 @@ export const MODES = {
   gerar_caso: {
     build: (c, m, extra) => ({
       json: true,
-      maxTokens: 4200,
+      maxTokens: 5200,
       temperature: 0.9,
-      timeoutMs: 45000,
+      timeoutMs: 50000,
       reasoning: 'medium',
       messages: [
-        { role: 'system', content: 'Você é roteirista de um jogo de simulação de processo penal brasileiro para casais. Cria casos realistas, juridicamente corretos (Código Penal, CPP, leis especiais, STF/STJ), cheios de detalhes, ambiguidades e inconsistências que obrigam os jogadores a prestar atenção. Evite crimes sexuais e violência contra crianças. Nomes de pessoas fictícios. Português do Brasil. Responda somente com json válido.' },
-        { role: 'user', content: `Crie um caso INÉDITO sobre o tema: ${clip(extra.tema || 'crime patrimonial urbano', 200)}.\nNão repita estes casos já jogados: ${list(extra.evitar).map(x => clip(x, 60)).join('; ') || 'nenhum'}.\n\nRegras do roteiro:\n- Contexto 100% brasileiro: PM, Polícia Civil, delegacia, B.O., IML, 190, SAMU 192, valores em reais, cidades brasileiras.\n- O "nome" e o "titulo" devem combinar exatamente com o crime do caso.\n- O caso deve ser EQUILIBRADO: os dois lados precisam ter boas chances de vencer.\n- Plante inconsistências objetivas: cada depoente tem um campo "contradicao" no formato "Ele(a) diz que X — mas a prova Y mostra Z", onde Z é um DADO concreto (horário, valor, distância, placa, cor, quantidade) que aparece literalmente em uma das "provas". Exemplo de boa contradição: "Ele diz que o alarme tocou às 2h05 — mas a câmera registra o arrombamento às 2h14."\n- Duas reviravoltas que MUDAM a análise jurídica (afastam ou reforçam dolo, autoria, legítima defesa, qualificadora, prova ilícita...): a primeira favorece um lado, a segunda favorece o outro. Fatos novos, surpreendentes e coerentes com tudo o que veio antes.\n- Segredos: cada depoente tem 1 ou 2 segredos que só revela se perguntarem diretamente.\n- Exatamente 4 depoentes, o último é o réu (papel "reu", arrolada_por "juizo").\n- rito "juri" SOMENTE se for crime doloso contra a vida; acordo true SOMENTE se for crime sem violência ou grave ameaça com pena mínima menor que 4 anos.\n- Textos curtos e concretos (1-2 frases por item), sem HTML.\n\nFormato json:\n{"nome": "nome curto e chamativo do caso, 2 a 4 palavras", "titulo": "título do caso", "tags": ["CRIME", "ARTIGO PRINCIPAL", "TEMA"], "corpo": "resumo em 3-4 frases: quem, o quê, quando, onde e o que cada lado alega", "antecedentes": "perfil social do réu", "antecedentes_criminais": "...", "contexto_social": "...", "provas": ["6 provas concretas, com números, horários e nomes"], "linha_tempo": [{"hora": "...", "fato": "..."}] (6 itens), "penaMin": número em anos, "penaMax": número em anos, "agravantes": [{"t": "...", "ef": "+1/6"}] (2), "majorantes": [{"t": "...", "ef": "-1/3 ou +1/3"}] (3), "vade": [{"num": "Art. X CP", "nome": "...", "pena": "...", "texto": "texto legal resumido", "exp": "o que significa na prática no caso", "simple": "explicação para leigos", "use_acu": "como a acusação usa", "use_def": "como a defesa usa", "juris": "entendimento de tribunal", "ref": "STJ/STF ..."}] (3), "arts_rapidos": ["4 referências curtas"], "hot": ["4 pontos polêmicos em forma de pergunta"], "perguntas_acu": ["3"], "perguntas_def": ["3"], "rito": "comum" | "juri", "acordo": true | false, "testemunhas": [{"id": "slug-curto", "nome": "...", "emoji": "um emoji de pessoa", "papel": "vitima|testemunha|policial|perito|reu", "papel_txt": "ex.: vítima, dona da loja", "arrolada_por": "acusacao|defesa|juizo", "perfil": "idade, profissão, personalidade e jeito de falar", "depoimento": "o que conta espontaneamente", "segredos": ["..."], "contradicao": "Ele(a) diz que X — mas a prova Y mostra Z."}], "segredo_acu": ["1 informação que só a acusação sabe"], "segredo_def": ["1 informação que só a defesa sabe"], "fatos_ocultos": ["3 fatos que uma diligência pode descobrir"], "reviravoltas": [{"titulo": "...", "texto": "..."}, {"titulo": "...", "texto": "..."}], "dicas_acu": ["2 dicas para iniciantes"], "dicas_def": ["2 dicas para iniciantes"]}` }
+        { role: 'system', content: 'Você é roteirista de um jogo de simulação de processo penal brasileiro. Cria casos criminais GRAVES e complexos (homicídios, latrocínios, roubos de grande porte, sequestros, crimes de organização criminosa), realistas, juridicamente corretos (Código Penal, CPP, leis especiais, STF/STJ), cheios de detalhes, ambiguidades e inconsistências que obrigam os jogadores a prestar atenção. Evite crimes sexuais e violência contra crianças. Nomes de pessoas fictícios. Português do Brasil. Responda somente com json válido.' },
+        { role: 'user', content: `Crie um caso INÉDITO sobre o tema: ${clip(extra.tema || 'crime patrimonial urbano', 200)}.\nNão repita estes casos já jogados: ${list(extra.evitar).map(x => clip(x, 60)).join('; ') || 'nenhum'}.\n\nRegras do roteiro:\n- Contexto 100% brasileiro: PM, Polícia Civil, delegacia, B.O., IML, 190, SAMU 192, valores em reais, cidades brasileiras.\n- O "nome" e o "titulo" devem combinar exatamente com o crime do caso.\n- O caso deve ser GRAVE (pena máxima de pelo menos 8 anos) e ROBUSTO: várias questões jurídicas em disputa (autoria, dolo x culpa, qualificadoras, excludentes, participação de cada envolvido, validade de provas, dosimetria).\n- O caso deve ser EQUILIBRADO: cada lado precisa de pelo menos 4 pontos fortes reais nas provas ("pontos_acu" e "pontos_def"), para os dois terem boas chances de vencer.\n- Plante inconsistências objetivas: cada depoente tem um campo "contradicao" no formato "Ele(a) diz que X — mas a prova Y mostra Z", onde Z é um DADO concreto (horário, valor, distância, placa, cor, quantidade) que aparece literalmente em uma das "provas". Exemplo de boa contradição: "Ele diz que o alarme tocou às 2h05 — mas a câmera registra o arrombamento às 2h14."\n- Duas reviravoltas que MUDAM a análise jurídica (afastam ou reforçam dolo, autoria, legítima defesa, qualificadora, prova ilícita...): a primeira favorece um lado, a segunda favorece o outro. Fatos novos, surpreendentes e coerentes com tudo o que veio antes.\n- Segredos: cada depoente tem 1 ou 2 segredos que só revela se perguntarem diretamente.\n- Exatamente 5 depoentes (vítima ou familiar, testemunha de cada lado, um perito ou policial e, por último, o réu com papel "reu" e arrolada_por "juizo").\n- rito "juri" SOMENTE se for crime doloso contra a vida; acordo true SOMENTE se for crime sem violência ou grave ameaça com pena mínima menor que 4 anos.\n- Textos curtos e concretos (1-2 frases por item), sem HTML.\n\nFormato json:\n{"nome": "nome curto e chamativo do caso, 2 a 4 palavras", "titulo": "título do caso", "tags": ["CRIME", "ARTIGO PRINCIPAL", "TEMA"], "corpo": "resumo em 3-4 frases: quem, o quê, quando, onde e o que cada lado alega", "antecedentes": "perfil social do réu", "antecedentes_criminais": "...", "contexto_social": "...", "provas": ["8 provas concretas, com números, horários e nomes, algumas favorecendo cada lado"], "linha_tempo": [{"hora": "...", "fato": "..."}] (7 itens), "penaMin": número em anos, "penaMax": número em anos, "agravantes": [{"t": "...", "ef": "+1/6"}] (2), "majorantes": [{"t": "...", "ef": "-1/3 ou +1/3"}] (3), "vade": [{"num": "Art. X CP", "nome": "...", "pena": "...", "texto": "texto legal resumido", "exp": "o que significa na prática no caso", "simple": "explicação para leigos", "use_acu": "como a acusação usa", "use_def": "como a defesa usa", "juris": "entendimento de tribunal", "ref": "STJ/STF ..."}] (3), "arts_rapidos": ["4 referências curtas"], "hot": ["4 pontos polêmicos em forma de pergunta"], "pontos_acu": ["4 pontos fortes da acusação nas provas"], "pontos_def": ["4 pontos fortes da defesa nas provas"], "rito": "comum" | "juri", "acordo": true | false, "testemunhas": [{"id": "slug-curto", "nome": "...", "emoji": "um emoji de pessoa", "papel": "vitima|testemunha|policial|perito|reu", "papel_txt": "ex.: vítima, dona da loja", "arrolada_por": "acusacao|defesa|juizo", "perfil": "idade, profissão, personalidade e jeito de falar", "depoimento": "o que conta espontaneamente", "segredos": ["1 ou 2"], "contradicao": "Ele(a) diz que X — mas a prova Y mostra Z."}], "segredo_acu": ["1 informação que só a acusação sabe"], "segredo_def": ["1 informação que só a defesa sabe"], "fatos_ocultos": ["3 fatos que uma diligência pode descobrir"], "reviravoltas": [{"titulo": "...", "texto": "..."}, {"titulo": "...", "texto": "..."}], "dicas_acu": ["2 dicas para iniciantes"], "dicas_def": ["2 dicas para iniciantes"]}` }
       ]
     }),
-    validate: d => Boolean(d?.titulo && d?.corpo && list(d.provas).length >= 4 && list(d.testemunhas).length >= 3 && list(d.reviravoltas).length >= 2),
+    validate: d => Boolean(d?.titulo && d?.corpo && list(d.provas).length >= 6 && list(d.testemunhas).length >= 4 && list(d.reviravoltas).length >= 2 && Number(d.penaMax) >= 8),
     shape: d => ({ text: 'ok', caso: normalizeCase(d) })
   },
 
@@ -401,7 +463,7 @@ export const MODES = {
         maxTokens: 600,
         temperature: 0.85,
         messages: [
-          { role: 'system', content: `Você é ${lado} num jogo de simulação jurídica, jogando contra uma pessoa real. ${objetivo} Jogue para vencer, de forma técnica mas acessível. Defenda SEMPRE o seu lado: nunca mencione as teses do adversário como se fossem suas (um promotor não alega excludentes do réu; um defensor não pede condenação). Não seja perfeito demais: às vezes deixe de explorar algum ponto, como um advogado real. Nível do adversário: ${NIVEL_TXT[extra.nivel_humano] || NIVEL_TXT.advogado} — ajuste sua força a ele. Português do Brasil.` },
+          { role: 'system', content: `Você é ${lado} num jogo de simulação jurídica, jogando contra uma pessoa real. ${objetivo} Jogue para vencer, de forma técnica mas acessível. Use somente fatos que estão no caso e nos autos (inventar fatos ou acusar o adversário de crimes é punido pelo juiz). Defenda SEMPRE o seu lado: nunca mencione as teses do adversário como se fossem suas (um promotor não alega excludentes do réu; um defensor não pede condenação). Não seja perfeito demais: às vezes deixe de explorar algum ponto, como um advogado real. Nível do adversário: ${NIVEL_TXT[extra.nivel_humano] || NIVEL_TXT.advogado} — ajuste sua força a ele. Português do Brasil.` },
           { role: 'user', content: `${describeCase(c)}\n\n${extra.segredos?.length ? `Informações que só o seu lado conhece: ${extra.segredos.map(s => clip(s, 300)).join(' | ')}\n\n` : ''}${describeAutos(extra)}\n\nTAREFA: ${tarefas[extra.tarefa] || tarefas.replica}\n\nLEMBRE: você é a ${acu ? 'ACUSAÇÃO e quer a CONDENAÇÃO' : 'DEFESA e quer a ABSOLVIÇÃO'}. Responda APENAS com um objeto json válido: {"texto": "...", "pedido": "...", "testemunha_id": "...", "aceita": true|false} (preencha só os campos que a tarefa pede).` }
         ]
       };
