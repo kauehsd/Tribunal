@@ -73,10 +73,17 @@ function shapeDosimetria(d) {
 }
 
 // ─── Caso gerado pela IA → mesmo formato de data/cases.js + data/dossies.js ──
-// Tudo vira texto puro escapado (algumas telas inserem esses campos como HTML).
+// Campos que as telas inserem como HTML (corpo e textos do vade mecum) são escapados aqui;
+// todos os outros ficam como texto puro, porque as telas já os escapam ao exibir.
 const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-const txt = (v, max = 600) => esc(clip(str(v), max));
+const txt = (v, max = 600) => clip(str(v), max).replace(/[<>]/g, '');
+const html = (v, max = 600) => esc(clip(str(v), max));
 const txts = (v, n, max = 400) => list(v).slice(0, n).map(x => txt(x, max)).filter(Boolean);
+// primeiro emoji inteiro (emojis compostos, como 👩‍⚕️, têm vários caracteres)
+const firstEmoji = v => {
+  const s = str(v, '🧑');
+  try { return [...new Intl.Segmenter('pt', { granularity: 'grapheme' }).segment(s)][0]?.segment || '🧑'; } catch { return [...s][0] || '🧑'; }
+};
 const slugId = (s, i) => (String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 20) || 'pessoa') + '_' + i;
 
 export function normalizeCase(d) {
@@ -86,7 +93,7 @@ export function normalizeCase(d) {
   let testemunhas = list(d.testemunhas).slice(0, 4).map((t, i) => ({
     id: slugId(t?.id || t?.nome, i),
     nome: txt(t?.nome, 60) || `Depoente ${i + 1}`,
-    emoji: clip(str(t?.emoji, '🧑'), 4),
+    emoji: firstEmoji(t?.emoji),
     papel: ['vitima', 'testemunha', 'policial', 'perito', 'reu'].includes(t?.papel) ? t.papel : 'testemunha',
     papel_txt: txt(t?.papel_txt, 60) || 'testemunha',
     arrolada_por: ['acusacao', 'defesa', 'juizo'].includes(t?.arrolada_por) ? t.arrolada_por : 'acusacao',
@@ -100,7 +107,7 @@ export function normalizeCase(d) {
   if (!reu) { reu = testemunhas[testemunhas.length - 1]; reu.papel = 'reu'; reu.papel_txt = 'réu'; }
   testemunhas = [...testemunhas.filter(t => t !== reu && t.papel !== 'reu'), { ...reu, arrolada_por: 'juizo' }];
   const reviravoltas = list(d.reviravoltas).slice(0, 2).map(r => ({ titulo: txt(r?.titulo, 80) || 'Fato novo', texto: txt(r?.texto, 500) }));
-  const corpo = txt(d.corpo, 1200);
+  const corpo = html(d.corpo, 1200);
   return {
     id: 'ia-' + Math.random().toString(36).slice(2, 8),
     gerado: true,
@@ -114,9 +121,9 @@ export function normalizeCase(d) {
     penaMin, penaMax, penaBase: penaMin,
     agravantes: list(d.agravantes).slice(0, 3).map(a => ({ t: txt(a?.t, 80), ef: txt(a?.ef, 30) || '+1/6', tipo: 'agg' })),
     majorantes: list(d.majorantes).slice(0, 3).map(a => ({ t: txt(a?.t, 80), ef: txt(a?.ef, 30) || '-1/6', tipo: /^-/.test(str(a?.ef)) ? 'ate' : 'agg' })),
-    vade: list(d.vade).slice(0, 3).map(v => ({ num: txt(v?.num, 40), nome: txt(v?.nome, 60), pena: txt(v?.pena, 80), texto: txt(v?.texto, 400), exp: txt(v?.exp, 400), simple: txt(v?.simple, 300), use_acu: txt(v?.use_acu, 300), use_def: txt(v?.use_def, 300), juris: txt(v?.juris, 200), ref: txt(v?.ref, 80) })),
+    vade: list(d.vade).slice(0, 3).map(v => ({ num: txt(v?.num, 40), nome: txt(v?.nome, 60), pena: txt(v?.pena, 80), texto: html(v?.texto, 400), exp: html(v?.exp, 400), simple: html(v?.simple, 300), use_acu: html(v?.use_acu, 300), use_def: html(v?.use_def, 300), juris: txt(v?.juris, 200), ref: txt(v?.ref, 80) })),
     arts_rapidos: txts(d.arts_rapidos, 4, 40),
-    context_juiz: corpo,
+    context_juiz: txt(d.corpo, 1200),
     antecedentes: txt(d.antecedentes, 300),
     antecedentes_criminais: txt(d.antecedentes_criminais, 300),
     contexto_social: txt(d.contexto_social, 300),
