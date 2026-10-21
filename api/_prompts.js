@@ -72,6 +72,71 @@ function shapeDosimetria(d) {
   };
 }
 
+// ─── Caso gerado pela IA → mesmo formato de data/cases.js + data/dossies.js ──
+// Tudo vira texto puro escapado (algumas telas inserem esses campos como HTML).
+const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const txt = (v, max = 600) => esc(clip(str(v), max));
+const txts = (v, n, max = 400) => list(v).slice(0, n).map(x => txt(x, max)).filter(Boolean);
+const slugId = (s, i) => (String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 20) || 'pessoa') + '_' + i;
+
+export function normalizeCase(d) {
+  const penaMin = Math.max(0, Number(d.penaMin) || 1);
+  const penaMax = Math.max(penaMin + 1, Number(d.penaMax) || penaMin + 4);
+  const tagColors = ['tr', 'tb', 'tg'];
+  let testemunhas = list(d.testemunhas).slice(0, 4).map((t, i) => ({
+    id: slugId(t?.id || t?.nome, i),
+    nome: txt(t?.nome, 60) || `Depoente ${i + 1}`,
+    emoji: clip(str(t?.emoji, '🧑'), 4),
+    papel: ['vitima', 'testemunha', 'policial', 'perito', 'reu'].includes(t?.papel) ? t.papel : 'testemunha',
+    papel_txt: txt(t?.papel_txt, 60) || 'testemunha',
+    arrolada_por: ['acusacao', 'defesa', 'juizo'].includes(t?.arrolada_por) ? t.arrolada_por : 'acusacao',
+    perfil: txt(t?.perfil, 300),
+    depoimento: txt(t?.depoimento, 500),
+    segredos: txts(t?.segredos, 2, 300),
+    contradicao: txt(t?.contradicao, 300)
+  }));
+  // garante exatamente um réu, e por último (o interrogatório encerra a instrução)
+  let reu = testemunhas.find(t => t.papel === 'reu');
+  if (!reu) { reu = testemunhas[testemunhas.length - 1]; reu.papel = 'reu'; reu.papel_txt = 'réu'; }
+  testemunhas = [...testemunhas.filter(t => t !== reu && t.papel !== 'reu'), { ...reu, arrolada_por: 'juizo' }];
+  const reviravoltas = list(d.reviravoltas).slice(0, 2).map(r => ({ titulo: txt(r?.titulo, 80) || 'Fato novo', texto: txt(r?.texto, 500) }));
+  const corpo = txt(d.corpo, 1200);
+  return {
+    id: 'ia-' + Math.random().toString(36).slice(2, 8),
+    gerado: true,
+    nome: txt(d.nome, 40) || txt(d.titulo, 40),
+    titulo: txt(d.titulo, 90),
+    tags: txts(d.tags, 3, 40).map((t, i) => ({ t: t.toUpperCase(), c: tagColors[i % 3] })),
+    corpo,
+    hot: txts(d.hot, 4, 200),
+    perguntas_acu: txts(d.perguntas_acu, 3, 200),
+    perguntas_def: txts(d.perguntas_def, 3, 200),
+    penaMin, penaMax, penaBase: penaMin,
+    agravantes: list(d.agravantes).slice(0, 3).map(a => ({ t: txt(a?.t, 80), ef: txt(a?.ef, 30) || '+1/6', tipo: 'agg' })),
+    majorantes: list(d.majorantes).slice(0, 3).map(a => ({ t: txt(a?.t, 80), ef: txt(a?.ef, 30) || '-1/6', tipo: /^-/.test(str(a?.ef)) ? 'ate' : 'agg' })),
+    vade: list(d.vade).slice(0, 3).map(v => ({ num: txt(v?.num, 40), nome: txt(v?.nome, 60), pena: txt(v?.pena, 80), texto: txt(v?.texto, 400), exp: txt(v?.exp, 400), simple: txt(v?.simple, 300), use_acu: txt(v?.use_acu, 300), use_def: txt(v?.use_def, 300), juris: txt(v?.juris, 200), ref: txt(v?.ref, 80) })),
+    arts_rapidos: txts(d.arts_rapidos, 4, 40),
+    context_juiz: corpo,
+    antecedentes: txt(d.antecedentes, 300),
+    antecedentes_criminais: txt(d.antecedentes_criminais, 300),
+    contexto_social: txt(d.contexto_social, 300),
+    provas: txts(d.provas, 8, 300),
+    linha_tempo: list(d.linha_tempo).slice(0, 8).map(e => ({ hora: txt(e?.hora || e?.data, 20), fato: txt(e?.fato, 250) })),
+    dossie: {
+      rito: d.rito === 'juri' ? 'juri' : 'comum',
+      acordo: d.acordo === true && d.rito !== 'juri',
+      testemunhas,
+      segredo_acu: txts(d.segredo_acu, 2, 300),
+      segredo_def: txts(d.segredo_def, 2, 300),
+      fatos_ocultos: txts(d.fatos_ocultos, 3, 300),
+      reviravoltas,
+      reviravolta: reviravoltas[0],
+      dicas_acu: txts(d.dicas_acu, 2, 200),
+      dicas_def: txts(d.dicas_def, 2, 200)
+    }
+  };
+}
+
 // ─── Modos ─────────────────────────────────────────────────────────────────
 
 export const MODES = {
@@ -101,7 +166,7 @@ export const MODES = {
         temperature: 0.8,
         messages: [
           { role: 'system', content: `Você é um ATOR interpretando ${t.nome}, ${t.papel_txt || 'testemunha'} num processo criminal brasileiro, durante a audiência de instrução de um jogo de simulação. Fique 100% no personagem: fale em primeira pessoa, como uma pessoa real falaria em juízo (nervosa, defensiva, emocionada ou técnica, conforme o perfil). Nunca saia do personagem, nunca fale de "jogo" ou de "IA". Português do Brasil.` },
-          { role: 'user', content: `${describeCase(c)}\n\nSUA FICHA:\nPerfil: ${clip(t.perfil, 600)}\nO que você conta espontaneamente: ${clip(t.depoimento, 900)}\nSegredos (só revele um se a pergunta tocar DIRETAMENTE nele; se perguntarem de forma vaga, desconverse; se a pergunta for muito precisa, você não pode mentir sob compromisso e deve admitir): ${list(t.segredos).map((s, i) => `(${i + 1}) ${clip(s, 300)}`).join(' ') || 'nenhum'}\nSua postura: você foi chamado(a) por ${t.arrolada_por === 'defesa' ? 'a defesa' : t.arrolada_por === 'acusacao' ? 'a acusação' : 'o juízo'}; ${t.papel === 'reu' ? 'você é o réu: pode se defender, minimizar, mas não confessa o que não está nos segredos.' : 'você presta compromisso de dizer a verdade, mas é humano e tem lado.'}\n\n${anteriores ? `PERGUNTAS JÁ FEITAS A VOCÊ:\n${anteriores}\n\n` : ''}AGORA ${quem.toUpperCase()} PERGUNTA:\n"${clip(extra.pergunta, 600)}"\n\nResponda em no máximo 3 frases, só sobre o que foi perguntado, sem inventar fatos que contradigam a ficha ou as provas. "revelou_segredo" é true SOMENTE se nesta resposta você contou um segredo da ficha que ainda NÃO apareceu em nenhuma resposta anterior (repetir algo já dito é false). Formato json:\n{"resposta": "sua fala", "revelou_segredo": true|false, "tom": "uma palavra: calmo, nervoso, emocionado, hostil, evasivo, técnico ou firme"}` }
+          { role: 'user', content: `${describeCase(c)}\n\nSUA FICHA:\nPerfil: ${clip(t.perfil, 600)}\nO que você conta espontaneamente: ${clip(t.depoimento, 900)}\nSegredos (só revele um se a pergunta tocar DIRETAMENTE nele; se perguntarem de forma vaga, desconverse; se a pergunta for muito precisa, você não pode mentir sob compromisso e deve admitir): ${list(t.segredos).map((s, i) => `(${i + 1}) ${clip(s, 300)}`).join(' ') || 'nenhum'}\n${t.contradicao ? `Ponto em que a sua versão está ERRADA (você não sabe disso, acredita nela e a sustenta com naturalidade; se perguntarem sobre esse detalhe, repita a sua versão; só hesite se a pergunta citar a prova que te desmente): ${clip(t.contradicao, 300)}\n` : ''}Sua postura: você foi chamado(a) por ${t.arrolada_por === 'defesa' ? 'a defesa' : t.arrolada_por === 'acusacao' ? 'a acusação' : 'o juízo'}; ${t.papel === 'reu' ? 'você é o réu: pode se defender, minimizar, mas não confessa o que não está nos segredos.' : 'você presta compromisso de dizer a verdade, mas é humano e tem lado.'}\n\n${anteriores ? `PERGUNTAS JÁ FEITAS A VOCÊ:\n${anteriores}\n\n` : ''}AGORA ${quem.toUpperCase()} PERGUNTA:\n"${clip(extra.pergunta, 600)}"\n\nResponda em no máximo 3 frases, só sobre o que foi perguntado, sem inventar fatos que contradigam a ficha ou as provas. "revelou_segredo" é true SOMENTE se nesta resposta você contou um segredo da ficha que ainda NÃO apareceu em nenhuma resposta anterior (repetir algo já dito é false). Formato json:\n{"resposta": "sua fala", "revelou_segredo": true|false, "tom": "uma palavra: calmo, nervoso, emocionado, hostil, evasivo, técnico ou firme"}` }
         ]
       };
     },
@@ -136,6 +201,37 @@ export const MODES = {
       fato_usado: int(d?.fato_usado, -1, 50, -1),
       em_resumo: str(d?.em_resumo)
     })
+  },
+
+  // "Excelência, há uma contradição!" — o juiz verifica se o jogador pegou a testemunha
+  contradicao: {
+    build: (c, m, extra) => {
+      const t = extra.testemunha || {};
+      const depo = list(extra.depoimentos).map(d => `- Pergunta: "${clip(d.pergunta, 300)}" → Resposta: "${clip(d.resposta, 400)}"`).join('\n') || '(nenhum depoimento ainda)';
+      return judgePrompt(c, extra,
+        `FASE: audiência de instrução. ${extra.por === 'acusacao' ? 'A Acusação' : 'A Defesa'} aponta uma CONTRADIÇÃO no depoimento de ${clip(t.nome, 80)}:\n"${clip(extra.alegacao, 600)}"\n\nO QUE ${String(t.nome || '').toUpperCase()} DISSE EM JUÍZO:\n${depo}\n\nINFORMAÇÃO RESERVADA AO JUIZ (o jogador não a vê): o ponto em que este depoimento conflita com as provas é: ${clip(t.contradicao || 'nenhum ponto específico', 400)}\n\nDecida se a contradição PROCEDE: procede quando o jogador identificou um conflito real entre o que a testemunha disse e as provas/outros depoimentos (o ponto reservado acima OU outro conflito verdadeiro e relevante que esteja nos autos). Não procede se for invenção, interpretação forçada ou algo que a testemunha não disse. Seja justo, sem ser bonzinho.\nFormato:\n{"procede": true | false, "fundamento": "2 frases, em tom de audiência, dizendo o que a testemunha disse e o que a prova mostra", ${RESUMO}}`, 450);
+    },
+    shape: d => ({
+      procede: d?.procede === true,
+      text: str(d?.fundamento, 'Não vislumbro contradição relevante.'),
+      em_resumo: str(d?.em_resumo)
+    })
+  },
+
+  // Gera um caso inédito completo (com dossiê): crimes variados, contradições e duas reviravoltas
+  gerar_caso: {
+    build: (c, m, extra) => ({
+      json: true,
+      maxTokens: 4200,
+      temperature: 0.95,
+      timeoutMs: 45000,
+      messages: [
+        { role: 'system', content: 'Você é roteirista de um jogo de simulação de processo penal brasileiro para casais. Cria casos realistas, juridicamente corretos (Código Penal, CPP, leis especiais, STF/STJ), cheios de detalhes, ambiguidades e inconsistências que obrigam os jogadores a prestar atenção. Evite crimes sexuais e violência contra crianças. Nomes de pessoas fictícios. Português do Brasil. Responda somente com json válido.' },
+        { role: 'user', content: `Crie um caso INÉDITO sobre o tema: ${clip(extra.tema || 'crime patrimonial urbano', 200)}.\nNão repita estes casos já jogados: ${list(extra.evitar).map(x => clip(x, 60)).join('; ') || 'nenhum'}.\n\nRegras do roteiro:\n- O caso deve ser EQUILIBRADO: os dois lados precisam ter boas chances de vencer.\n- Plante inconsistências: cada depoente tem um campo "contradicao" com um detalhe em que a versão dele CONFLITA com uma prova concreta (horário, valor, distância, quem estava onde...). As provas devem conter o dado que desmente.\n- Duas reviravoltas: a primeira favorece um lado, a segunda favorece o outro. Fatos novos, surpreendentes e coerentes.\n- Segredos: cada depoente tem 1 ou 2 segredos que só revela se perguntarem diretamente.\n- Exatamente 4 depoentes, o último é o réu (papel "reu", arrolada_por "juizo").\n- rito "juri" SOMENTE se for crime doloso contra a vida; acordo true SOMENTE se for crime sem violência ou grave ameaça com pena mínima menor que 4 anos.\n- Textos curtos e concretos (1-2 frases por item), sem HTML.\n\nFormato json:\n{"nome": "nome curto e chamativo do caso, 2 a 4 palavras", "titulo": "título do caso", "tags": ["CRIME", "ARTIGO PRINCIPAL", "TEMA"], "corpo": "resumo em 3-4 frases: quem, o quê, quando, onde e o que cada lado alega", "antecedentes": "perfil social do réu", "antecedentes_criminais": "...", "contexto_social": "...", "provas": ["6 provas concretas, com números, horários e nomes"], "linha_tempo": [{"hora": "...", "fato": "..."}] (6 itens), "penaMin": número em anos, "penaMax": número em anos, "agravantes": [{"t": "...", "ef": "+1/6"}] (2), "majorantes": [{"t": "...", "ef": "-1/3 ou +1/3"}] (3), "vade": [{"num": "Art. X CP", "nome": "...", "pena": "...", "texto": "texto legal resumido", "exp": "o que significa na prática no caso", "simple": "explicação para leigos", "use_acu": "como a acusação usa", "use_def": "como a defesa usa", "juris": "entendimento de tribunal", "ref": "STJ/STF ..."}] (3), "arts_rapidos": ["4 referências curtas"], "hot": ["4 pontos polêmicos em forma de pergunta"], "perguntas_acu": ["3"], "perguntas_def": ["3"], "rito": "comum" | "juri", "acordo": true | false, "testemunhas": [{"id": "slug-curto", "nome": "...", "emoji": "um emoji de pessoa", "papel": "vitima|testemunha|policial|perito|reu", "papel_txt": "ex.: vítima, dona da loja", "arrolada_por": "acusacao|defesa|juizo", "perfil": "idade, profissão, personalidade e jeito de falar", "depoimento": "o que conta espontaneamente", "segredos": ["..."], "contradicao": "Ele(a) diz que X — mas a prova Y mostra Z."}], "segredo_acu": ["1 informação que só a acusação sabe"], "segredo_def": ["1 informação que só a defesa sabe"], "fatos_ocultos": ["3 fatos que uma diligência pode descobrir"], "reviravoltas": [{"titulo": "...", "texto": "..."}, {"titulo": "...", "texto": "..."}], "dicas_acu": ["2 dicas para iniciantes"], "dicas_def": ["2 dicas para iniciantes"]}` }
+      ]
+    }),
+    validate: d => Boolean(d?.titulo && d?.corpo && list(d.provas).length >= 4 && list(d.testemunhas).length >= 3 && list(d.reviravoltas).length >= 2),
+    shape: d => ({ text: 'ok', caso: normalizeCase(d) })
   },
 
   // Fim da instrução nos crimes dolosos contra a vida: vai a júri ou não?

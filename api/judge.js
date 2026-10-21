@@ -50,7 +50,7 @@ const PROVIDERS = [
 ];
 
 const PROVIDER_TIMEOUT_MS = 20000;
-const TOTAL_BUDGET_MS = 52000;
+const TOTAL_BUDGET_MS = 56000;
 const COOLDOWN_MS = 60000;
 
 // Quando uma IA responde "limite atingido" (429), pulamos ela por 1 minuto.
@@ -113,7 +113,7 @@ export async function askAnyProvider(prompt, validate = () => true) {
     const remaining = TOTAL_BUDGET_MS - (Date.now() - started);
     if (remaining < 3000) break;
     try {
-      const text = await callProvider(provider, prompt, Math.min(PROVIDER_TIMEOUT_MS, remaining));
+      const text = await callProvider(provider, prompt, Math.min(prompt.timeoutMs || PROVIDER_TIMEOUT_MS, remaining));
       if (!validate(text)) throw new Error(`${provider.name} respondeu fora do formato`);
       return { text, provider: provider.name };
     } catch (e) {
@@ -174,7 +174,7 @@ export default async function handler(req, res) {
   const spec = MODES[mode];
   try {
     const prompt = spec.build(body.caseObj || {}, body.messages || [], body.extra || {});
-    const validate = prompt.json ? (t => Boolean(parseLooseJson(t))) : undefined;
+    const validate = prompt.json ? (t => { const d = parseLooseJson(t); return Boolean(d) && (!spec.validate || spec.validate(d)); }) : undefined;
     const { text, provider } = await askAnyProvider(prompt, validate);
     const data = prompt.json ? parseLooseJson(text) : text;
     return res.status(200).json({ ...spec.shape(data, body.extra || {}), provider });
