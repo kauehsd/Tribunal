@@ -159,6 +159,10 @@ function palavras(t) {
   return new Set((norm.match(/[a-z0-9]+/g) || []).filter(w => !STOP.has(w) && (w.length >= 4 || /\d/.test(w))));
 }
 
+// Raízes das palavras (4 primeiras letras), para "confessou" e "confissões" contarem como o mesmo assunto
+function raizes(t) { return new Set([...palavras(t)].map(w => /d/.test(w) ? w : w.slice(0, 4))); }
+function mesmoAssunto(a, b, minimo) { const rb = raizes(b); return [...raizes(a)].filter(w => rb.has(w)).length >= minimo; }
+
 // O trecho citado pela IA existe mesmo no texto? (pelo menos 70% das palavras relevantes, e no mínimo 2)
 function trechoNoTexto(trecho, texto) {
   const t = palavras(trecho), base = palavras(texto);
@@ -276,8 +280,7 @@ export const MODES = {
     shape: (d, extra) => {
       const texto = str(extra.peca?.texto);
       const trecho = str(d?.trecho);
-      const mesmoAssunto = [...palavras(trecho)].filter(w => palavras(extra.alegacao).has(w)).length >= 1;
-      const procede = d?.procede === true && trechoNoTexto(trecho, texto) && mesmoAssunto;
+      const procede = d?.procede === true && trechoNoTexto(trecho, texto) && mesmoAssunto(trecho, extra.alegacao, 1);
       return {
         procede,
         trecho: procede ? clip(trecho, 200) : '',
@@ -301,10 +304,8 @@ export const MODES = {
       // e precisa ser sobre o mesmo assunto que o jogador alegou.
       const depoimento = list(extra.depoimentos).map(x => x.resposta).join(' ');
       const trecho = str(d?.trecho_do_depoimento);
-      const doDepo = palavras(depoimento), doTrecho = palavras(trecho), daAlegacao = palavras(extra.alegacao);
-      const trechoExiste = doTrecho.size > 0 && [...doTrecho].filter(w => doDepo.has(w)).length >= Math.max(2, Math.ceil(doTrecho.size * 0.6));
-      const mesmoAssunto = [...doTrecho].filter(w => daAlegacao.has(w)).length >= 2;
-      const procede = d?.procede === true && trechoExiste && mesmoAssunto && Boolean(str(d?.prova_que_contradiz));
+      const trechoExiste = trechoNoTexto(trecho, depoimento);
+      const procede = d?.procede === true && trechoExiste && mesmoAssunto(trecho, extra.alegacao, 2) && Boolean(str(d?.prova_que_contradiz));
       return {
         procede,
         text: procede ? str(d?.fundamento) : (d?.procede === true ? 'Não procede. O que foi apontado não corresponde ao que a testemunha declarou em juízo.' : str(d?.fundamento, 'Não vislumbro contradição relevante.')),
