@@ -250,7 +250,11 @@ export const MODES = {
   // Modo treino: a IA joga como o adversário
   oponente: {
     build: (c, m, extra) => {
-      const lado = extra.papel === 'acusacao' ? 'PROMOTOR(A) DE JUSTIÇA (Acusação)' : 'DEFENSOR(A) (Defesa)';
+      const acu = extra.papel === 'acusacao';
+      const lado = acu ? 'PROMOTOR(A) DE JUSTIÇA (Acusação)' : 'DEFENSOR(A) (Defesa)';
+      const objetivo = acu
+        ? 'Seu objetivo é a CONDENAÇÃO do réu. Mesmo que as provas favoreçam a defesa, você minimiza essas provas, explora as contradições e pede a condenação (no máximo, uma pena menor). Você NUNCA pede absolvição e NUNCA defende excludentes do réu.'
+        : 'Seu objetivo é a ABSOLVIÇÃO do réu (ou, se impossível, a menor pena). Você explora as dúvidas e as falhas da acusação. Você NUNCA pede condenação.';
       const tarefas = {
         denuncia: 'Escreva a DENÚNCIA: narre o fato, tipifique o crime com artigos e peça a condenação. Máx. 5 frases.',
         resposta: 'Escreva a RESPOSTA À ACUSAÇÃO: apresente as teses da defesa (preliminares, excludentes, falta de prova). Máx. 5 frases.',
@@ -267,17 +271,18 @@ export const MODES = {
         maxTokens: 600,
         temperature: 0.85,
         messages: [
-          { role: 'system', content: `Você é ${lado} num jogo de simulação jurídica, jogando contra uma pessoa real. Jogue para vencer, de forma técnica mas acessível. Defenda SEMPRE o seu lado: nunca mencione as teses do adversário como se fossem suas (um promotor não alega excludentes do réu; um defensor não pede condenação). Não seja perfeito demais: às vezes deixe de explorar algum ponto, como um advogado real. Nível do adversário: ${NIVEL_TXT[extra.nivel_humano] || NIVEL_TXT.advogado} — ajuste sua força a ele. Português do Brasil.` },
-          { role: 'user', content: `${describeCase(c)}\n\n${extra.segredos?.length ? `Informações que só o seu lado conhece: ${extra.segredos.map(s => clip(s, 300)).join(' | ')}\n\n` : ''}${describeAutos(extra)}\n\nTAREFA: ${tarefas[extra.tarefa] || tarefas.replica}\n\nResponda APENAS com um objeto json válido: {"texto": "...", "pedido": "...", "testemunha_id": "...", "aceita": true|false} (preencha só os campos que a tarefa pede).` }
+          { role: 'system', content: `Você é ${lado} num jogo de simulação jurídica, jogando contra uma pessoa real. ${objetivo} Jogue para vencer, de forma técnica mas acessível. Defenda SEMPRE o seu lado: nunca mencione as teses do adversário como se fossem suas (um promotor não alega excludentes do réu; um defensor não pede condenação). Não seja perfeito demais: às vezes deixe de explorar algum ponto, como um advogado real. Nível do adversário: ${NIVEL_TXT[extra.nivel_humano] || NIVEL_TXT.advogado} — ajuste sua força a ele. Português do Brasil.` },
+          { role: 'user', content: `${describeCase(c)}\n\n${extra.segredos?.length ? `Informações que só o seu lado conhece: ${extra.segredos.map(s => clip(s, 300)).join(' | ')}\n\n` : ''}${describeAutos(extra)}\n\nTAREFA: ${tarefas[extra.tarefa] || tarefas.replica}\n\nLEMBRE: você é a ${acu ? 'ACUSAÇÃO e quer a CONDENAÇÃO' : 'DEFESA e quer a ABSOLVIÇÃO'}. Responda APENAS com um objeto json válido: {"texto": "...", "pedido": "...", "testemunha_id": "...", "aceita": true|false} (preencha só os campos que a tarefa pede).` }
         ]
       };
     },
-    shape: d => ({
-      text: str(d?.texto, '...'),
-      pedido: str(d?.pedido),
-      testemunha_id: str(d?.testemunha_id),
-      aceita: d?.aceita === true
-    })
+    shape: (d, extra) => {
+      let pedido = str(d?.pedido);
+      // trava de segurança: o rival não pode pedir o resultado do adversário
+      if (extra.papel === 'acusacao' && /absolv/i.test(pedido)) pedido = 'condenação';
+      if (extra.papel === 'defesa' && /^\s*condena/i.test(pedido)) pedido = 'absolvição';
+      return { text: str(d?.texto, '...'), pedido, testemunha_id: str(d?.testemunha_id), aceita: d?.aceita === true };
+    }
   },
 
   // Assistente privado de estratégia (texto livre)
