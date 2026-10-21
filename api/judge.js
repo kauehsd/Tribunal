@@ -77,8 +77,10 @@ async function callProvider(provider, prompt, timeoutMs) {
     };
     if (prompt.json && provider.jsonMode) body.response_format = { type: 'json_object' };
     // Modelos que "pensam" antes de responder gastam tokens nisso: pensamento curto e margem extra
-    if (/gpt-oss/.test(model)) { body.reasoning_effort = 'low'; body.max_tokens += 800; }
-    if (provider.name === 'openrouter') { body.max_tokens += 800; body.reasoning = { effort: 'low' }; }
+    const effort = prompt.reasoning || 'low';
+    const extraTokens = effort === 'low' ? 800 : 2500;
+    if (/gpt-oss/.test(model)) { body.reasoning_effort = effort; body.max_tokens += extraTokens; }
+    if (provider.name === 'openrouter') { body.max_tokens += extraTokens; body.reasoning = { effort }; }
 
     const r = await fetch(provider.url, {
       method: 'POST',
